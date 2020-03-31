@@ -52,8 +52,8 @@ pub enum Strandness {
 
 impl Strandness {
     #[inline]
-    fn matches_bam_record(&self, r: &bam::Record, target: Strand) -> bool {
-        if self == &Strandness::Unstranded {
+    fn matches_bam_record(self, r: &bam::Record, target: Strand) -> bool {
+        if self == Strandness::Unstranded {
             return true;
         }
         
@@ -141,7 +141,7 @@ pub struct GeneMap {
 
 impl GeneMap {
     pub fn from_gtf<P: AsRef<Path>>(p: P) -> Result<GeneMap> {
-        //open gff
+        //open gtf
         let f = File::open(p)?;
         let mut reader = GtfReader::new(BufReader::new(f));
         
@@ -243,19 +243,19 @@ impl ReadMappings {
         let mut w = BufWriter::new(o);
         for (geneidx, &count) in self.hit.iter().enumerate() {
             w.write_all(genes.hit_name(geneidx).unwrap().as_bytes())?;
-            w.write(&[b'\t'])?;
+            w.write_all(&[b'\t'])?;
             itoa::write(&mut w, count)?;
-            w.write(&[b'\n'])?;
+            w.write_all(&[b'\n'])?;
         }
 
-        write!(w, "qc_failed\t{}\n", self.qc_failed)?;
-        write!(w, "unmapped\t{}\n", self.unmapped)?;
-        write!(w, "secondary_alignments\t{}\n", self.secondary)?;
-        write!(w, "marked_duplicated\t{}\n", self.duplicated)?;
-        write!(w, "ambiguous\t{}\n", self.ambiguous)?;
-        write!(w, "ambiguous_pair\t{}\n", self.ambiguous_pair)?;
-        write!(w, "chr_not_in_ref\t{}\n", self.notinref)?;
-        write!(w, "nohit\t{}\n", self.nohit)?;
+        writeln!(w, "qc_failed\t{}", self.qc_failed)?;
+        writeln!(w, "unmapped\t{}", self.unmapped)?;
+        writeln!(w, "secondary_alignments\t{}", self.secondary)?;
+        writeln!(w, "marked_duplicated\t{}", self.duplicated)?;
+        writeln!(w, "ambiguous\t{}", self.ambiguous)?;
+        writeln!(w, "ambiguous_pair\t{}", self.ambiguous_pair)?;
+        writeln!(w, "chr_not_in_ref\t{}", self.notinref)?;
+        writeln!(w, "nohit\t{}", self.nohit)?;
 
         Ok(())
     }
@@ -315,21 +315,19 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
                     if record.is_mate_unmapped() && !config.nosingletons {
                         counts.count_hit(map_segments(&record, ref_chr_map, config));
                     } else {
-                        //is the mate on the same chromosome? if not than this read is ambiguous
+                        //is the mate on the same chromosome? if not than this read pair is ambiguous
                         if record.tid() != record.mtid() {
                             counts.ambiguous_pair += 1;
-                        } else {
-                            if let Some(mate) = delayed.remove(record.qname()) {
-                                let m1 = map_segments(&record, ref_chr_map, config);
-                                let m2 = map_segments(&mate, ref_chr_map, config);
-                                if m1 == m2 {
-                                    counts.count_hit(map_segments(&record, ref_chr_map, config));
-                                } else {
-                                    counts.ambiguous_pair += 1;
-                                }
+                        } else if let Some(mate) = delayed.remove(record.qname()) {
+                            let m1 = map_segments(&record, ref_chr_map, config);
+                            let m2 = map_segments(&mate, ref_chr_map, config);
+                            if m1 == m2 {
+                                counts.count_hit(map_segments(&record, ref_chr_map, config));
                             } else {
-                                delayed.insert(record.qname().to_vec(), record);
+                                counts.ambiguous_pair += 1;
                             }
+                        } else {
+                            delayed.insert(record.qname().to_vec(), record);
                         }
                     }
                 } else {
