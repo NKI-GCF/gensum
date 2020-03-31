@@ -8,6 +8,14 @@ identical counts in the union mode, and minor differences in strict mode (1 in
 35000 reads). `GeSum` is much much faster. A 15 million read `bam` file can be
 quantified in around 5s while `htseq-count` takes about 11 minutes.
 
+## Installation
+
+For now manually build using the rust toolchain (https://rustup.rs/).
+```
+cargo build --release
+# binary ends up here:
+./target/release/gensum --help
+```
 
 ## Input
 Required input is a GTF file that contains the exons and the gene-ids. GenSum
