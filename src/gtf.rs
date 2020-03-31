@@ -81,7 +81,7 @@ pub struct GtfExon<'a> {
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Strand {
-    Foward,
+    Forward,
     Reverse,
     Unknown
 }
@@ -90,7 +90,7 @@ impl FromStr for Strand {
     type Err = &'static str;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "+" => Ok(Strand::Foward),
+            "+" => Ok(Strand::Forward),
             "-" => Ok(Strand::Reverse),
             "." => Ok(Strand::Unknown),
             _ => Err("GTF strand not +/-/.")

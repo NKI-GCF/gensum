@@ -67,13 +67,12 @@ impl Strandness {
         };
 
         match (self, target) {
-            (Strandness::Forward, Strand::Foward) => fragment_forward,
-            (Strandness::Forward, Strand::Reverse) => !fragment_forward,
-            (Strandness::Forward, Strand::Unknown) => true,
-            (Strandness::Reverse, Strand::Foward) => !fragment_forward,
+            (Strandness::Unstranded, _) => unreachable!(),
+            (_, Strand::Unknown) => true,
+            (Strandness::Forward, Strand::Forward) |
             (Strandness::Reverse, Strand::Reverse) => fragment_forward,
-            (Strandness::Reverse, Strand::Unknown) => true,
-            (Strandness::Unstranded, _) => unreachable!()
+            (Strandness::Forward, Strand::Reverse) |
+            (Strandness::Reverse, Strand::Forward) => !fragment_forward,
         }
     }
 }
