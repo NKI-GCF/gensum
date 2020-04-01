@@ -11,7 +11,7 @@ use anyhow::{anyhow, Result};
 use indexmap::IndexSet;
 use itoa;
 use nclist::{NClist, Interval};
-use rust_htslib::{bam, bam::Read, bam::record::Cigar};
+use rust_htslib::bam::{self, record::Cigar, Reader, Read};
 
 use crate::gtf::{GtfReader, Strand};
 
@@ -123,14 +123,6 @@ impl Interval for Exon {
     }
 }
 
-fn get_index_or_insert_owned(map: &mut IndexSet<String>, v: &str) -> usize {
-    if !map.contains(v) {
-        map.insert_full(v.to_owned()).0
-    } else {
-        map.get_full(v).unwrap().0
-    }
-}
-
 pub struct GeneMap {
     genes: IndexSet<String>,
     seq_names: IndexSet<String>,
@@ -138,11 +130,11 @@ pub struct GeneMap {
 }
 
 impl GeneMap {
-    pub fn from_gtf<P: AsRef<Path>>(p: P) -> Result<GeneMap> {
+    pub fn from_gtf<P: AsRef<Path>>(p: P, tids: &Vec<String>) -> Result<GeneMap> {
         //open gtf
         let f = File::open(p)?;
         let mut reader = GtfReader::new(BufReader::new(f));
-        
+
         let mut genes = IndexSet::new();
         let mut seq_names = IndexSet::new();
         let mut exons = Vec::new();
@@ -160,8 +152,19 @@ impl GeneMap {
 
             if let Some(r) = reader.parse_exon()? {
 
-                let gene_idx = get_index_or_insert_owned(&mut genes, r.id);
-                let chr_idx = get_index_or_insert_owned(&mut seq_names, r.seq_name);
+                let gene_idx = if !genes.contains(r.seq_name) {
+                    genes.insert_full(r.seq_name.to_owned()).0
+                } else {
+                    genes.get_full(r.seq_name).unwrap().0
+                };
+
+                let chr_idx = if !seq_names.contains(r.seq_name) {
+                    seq_names.insert_full(r.seq_name.to_owned()).0
+                } else if tids.contains(&r.seq_name.to_string()) {
+                    seq_names.get_full(r.seq_name).unwrap().0
+                } else {
+                    return Err(anyhow!("Gtf contains unexpected contigs: {}", r.seq_name));
+                };
 
                  if r.end - r.start < 0 {
                      eprintln!("Yikes: {} {} {}", r.start, r.end, gtfline);
@@ -259,23 +262,11 @@ impl ReadMappings {
     }
 }
 
-pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneMap) -> Result<ReadMappings> {
-    //open bam
-    let mut bam = bam::Reader::from_path(bam_file)?;
-    // test from command line show improve until 4 cpu's
-    bam.set_threads(4)?;
+pub fn quantify_bam(mut bam: Reader, config: Config, genemap: &GeneMap, tids: Vec<String>) -> Result<ReadMappings> {
 
-    //intersect header chr list with rr
-    let header = bam.header();
-    let tid_map: Vec<_> = header.target_names().iter()
-        .map(|v| String::from_utf8_lossy(v))
-        .map(|name| {
-            if let Some(idx) = genemap.seq_names.iter().position(|n| name == n.as_ref()) {
-                Some(idx)
-            } else {
-                None
-            }
-        }).collect();
+    let tid_map: Vec<Option<usize>> = tids.into_iter()
+        .map(|name| genemap.seq_names.iter().position(|n| name == n.as_ref()))
+        .collect();
 
     //quantify
     let mut delayed = HashMap::new();

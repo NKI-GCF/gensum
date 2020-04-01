@@ -8,6 +8,7 @@ mod gtf;
 mod app;
 
 use app::{GeneMap, Config, quantify_bam};
+use rust_htslib::{bam, bam::Read};
 
 fn main() -> Result<()> {
     let matches = App::new("gensum")
@@ -96,10 +97,21 @@ fn main() -> Result<()> {
     };
 
     let r = matches.value_of_os("gtf").unwrap();
-    let gm = GeneMap::from_gtf(r)?;
+    let bam_file = matches.value_of_os("bam").unwrap();
+    //open bam
+    let mut bam = bam::Reader::from_path(bam_file)?;
+    // test from command line show improve until 4 cpu's
+    bam.set_threads(4)?;
 
-    let bam = matches.value_of_os("bam").unwrap();
-    let res = quantify_bam(bam, config, &gm)?;
+    //intersect header chr list with rr
+    let header = bam.header();
+    let tids: Vec<String> = header.target_names().iter()
+        .map(|v| String::from_utf8_lossy(v).into_owned())
+        .collect();
+
+    let gm = GeneMap::from_gtf(r, &tids)?;
+
+    let res = quantify_bam(bam, config, &gm, tids)?;
 
     if let Some(f) = matches.value_of_os("output") {
         let o = File::create(f)?;
