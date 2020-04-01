@@ -122,29 +122,27 @@ mod test {
 
     #[test]
     fn read() {
-        let mut reader = GtfReader::new(Cursor::new(GTF));
+        let mut reader = GtfReader::new(Cursor::new(GTF)).unwrap();
 
         //gene entry
-        assert!(reader.advance_record().unwrap());
         assert!(reader.parse_exon().unwrap().is_none());
+        assert!(reader.advance_record().unwrap());
 
         //transcript entry
-        assert!(reader.advance_record().unwrap());
         assert!(reader.parse_exon().unwrap().is_none());
+        assert!(reader.advance_record().unwrap());
 
         // two exons
-        assert!(reader.advance_record().unwrap());
         let r = reader.parse_exon().unwrap().unwrap();
         assert_eq!(r.id, b"ENSG00000112592");
+        assert!(reader.advance_record().unwrap());
 
-        assert!(reader.advance_record().unwrap());
         let r = reader.parse_exon().unwrap().unwrap();
         assert_eq!(r.id, b"ENSG00000112592");
+        assert!(reader.advance_record().unwrap());
 
         // and a CDS
-        assert!(reader.advance_record().unwrap());
         assert!(reader.parse_exon().unwrap().is_none());
-
         //EOF
         assert!(!reader.advance_record().unwrap());
 

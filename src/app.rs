@@ -125,12 +125,12 @@ impl Interval for Exon {
 
 pub struct GeneMap {
     genes: IndexSet<Vec<u8>>,
-    seq_names: IndexSet<Vec<u8>>,
+    pub seq_names: IndexSet<Vec<u8>>,
     intervals: Vec<NClist<Exon>>,
 }
 
 impl GeneMap {
-    pub fn from_gtf<P: AsRef<Path>>(p: P, tids: &Vec<String>) -> Result<GeneMap> {
+    pub fn from_gtf<P: AsRef<Path>>(p: P, tids: &[&[u8]]) -> Result<GeneMap> {
         //open gtf
         let f = File::open(p)?;
         let mut reader = GtfReader::new(BufReader::new(f))?;
@@ -156,10 +156,10 @@ impl GeneMap {
 
                 let chr_idx = if !seq_names.contains(r.seq_name) {
                     seq_names.insert_full(r.seq_name.to_owned()).0
-                } else if tids.contains(&r.seq_name.to_string()) {
+                } else if tids.contains(&r.seq_name) {
                     seq_names.get_full(r.seq_name).unwrap().0
                 } else {
-                    return Err(anyhow!("Gtf contains unexpected contigs: {}", r.seq_name));
+                    return Err(anyhow!("Gtf contains unexpected contigs: {}", std::str::from_utf8(r.seq_name).unwrap()));
                 };
 
                  if r.end - r.start < 0 {
@@ -261,11 +261,7 @@ impl ReadMappings {
     }
 }
 
-pub fn quantify_bam(mut bam: Reader, config: Config, genemap: &GeneMap, tids: Vec<String>) -> Result<ReadMappings> {
-
-    let tid_map: Vec<Option<usize>> = tids.into_iter()
-        .map(|name| genemap.seq_names.iter().position(|n| name == n.as_ref()))
-        .collect();
+pub fn quantify_bam(mut bam: Reader, config: Config, genemap: &GeneMap, tid_map: Vec<Option<usize>>) -> Result<ReadMappings> {
 
     //quantify
     let mut delayed = HashMap::new();

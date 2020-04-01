@@ -105,13 +105,15 @@ fn main() -> Result<()> {
 
     //intersect header chr list with rr
     let header = bam.header();
-    let tids: Vec<String> = header.target_names().iter()
-        .map(|v| String::from_utf8_lossy(v).into_owned())
-        .collect();
+    let tids: Vec<&[u8]> = header.target_names().iter().copied().collect();
 
     let gm = GeneMap::from_gtf(r, &tids)?;
 
-    let res = quantify_bam(bam, config, &gm, tids)?;
+    let tid_map = tids.into_iter()
+        .map(|name| gm.seq_names.iter().position(|n| *n == name))
+        .collect();
+
+    let res = quantify_bam(bam, config, &gm, tid_map)?;
 
     if let Some(f) = matches.value_of_os("output") {
         let o = File::create(f)?;
