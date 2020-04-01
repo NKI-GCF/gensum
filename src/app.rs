@@ -152,10 +152,10 @@ impl GeneMap {
 
             if let Some(r) = reader.parse_exon()? {
 
-                let gene_idx = if !genes.contains(r.id) {
-                    genes.insert_full(r.id.to_owned()).0
+                let gene_idx = if !genes.contains(r.seq_name) {
+                    genes.insert_full(r.seq_name.to_owned()).0
                 } else {
-                    genes.get_full(r.id).unwrap().0
+                    genes.get_full(r.seq_name).unwrap().0
                 };
 
                 let chr_idx = if !seq_names.contains(r.seq_name) {
