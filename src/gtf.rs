@@ -1,29 +1,32 @@
 use std::io::{self, BufRead};
 use std::str::FromStr;
 
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, anyhow};
 
 pub struct GtfReader<B> {
-    r: B,
-    last_line: String,
+    s: io::Split<B>,
+    last_line: Vec<u8>,
 }
 
 impl<B: BufRead> GtfReader<B> {
-    pub fn new(r: B) -> GtfReader<B> {
-        GtfReader { r, last_line: String::new() }
+    pub fn new(r: B) -> Result<GtfReader<B>> {
+        let mut s = r.split(b'\n');
+        while let Some(last_line) = s.next().transpose()? {
+            if last_line[0] != b'#' {
+                return Ok(GtfReader { s, last_line })
+            }
+        }
+        Err(anyhow!("No or only comment lines in gtf"))
     }
 
     /// consume from the buffreader until a record line is read
-    pub fn advance_record(&mut self) -> io::Result<bool> {
-        loop {
-            self.last_line.clear();
-            match self.r.read_line(&mut self.last_line)? {
-                0 => return Ok(false),
-                _ if self.last_line.starts_with('#') => {},
-                _ => break
-            }
+    pub fn advance_record(&mut self) -> Result<bool> {
+        if let Some(line) = self.s.next().transpose()? {
+            self.last_line = line;
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        Ok(true)
     }
 
     /// attempt to parse the current GTF line as an exon
@@ -31,32 +34,35 @@ impl<B: BufRead> GtfReader<B> {
     /// Fails when unable to parse or required attributes (gene_id)
     /// are not present
     pub fn parse_exon(&self) -> Result<Option<GtfExon>> {
-        let line = self.last_line.as_str();
-        let mut s = line.split('\t');
-        let seq_name = s.next().ok_or_else(|| data_error(line))?;
+        let line = &self.last_line;
+        let mut s = line.split(|&c| c == b'\t');
+        let seq_name = s.next().ok_or_else(|| data_error(&line))?;
         //eprintln!("chr {}", seq_name);
         //skip source
-        let seq_type = s.nth(1).ok_or_else(|| data_error(line))?;
+        let seq_type = s.nth(1).ok_or_else(|| data_error(&line))?;
         //eprintln!("type {}", seq_type);
-        if seq_type == "exon" {
+        if seq_type == b"exon" {
             let start = s.next()
-                .ok_or_else(|| data_error(line))?
+                .map(|u| std::str::from_utf8(&u)).transpose()?
+                .ok_or_else(|| data_error(&line))?
                 .parse().context("Invalid start")?;
             let end = s.next()
-                .ok_or_else(|| data_error(line))?
+                .map(|u| std::str::from_utf8(&u)).transpose()?
+                .ok_or_else(|| data_error(&line))?
                 .parse().context("Invalid end")?;
             let strand = s.nth(1)
-                .ok_or_else(|| data_error(line))?
-                .parse().map_err(|_| data_error(line)).context("Invalid strand")?;
+                .map(|u| std::str::from_utf8(&u)).transpose()?
+                .ok_or_else(|| data_error(&line))?
+                .parse().map_err(|_| data_error(&line)).context("Invalid strand")?;
 
-            let attrs = s.nth(1).ok_or_else(|| data_error(line)).context("No attributes")?;
+            let attrs = s.nth(1).ok_or_else(|| data_error(&line)).context("No attributes")?;
             //eprintln!("attr {}", attrs);
 
             // split attrs on ';'
-            let mut attr = attrs.split(';');
-            let id = attr.find(|s| s.starts_with("gene_id "))
-                .map(|s| s.split_at(9).1.trim_matches('"'))
-                .ok_or_else(|| data_error(line)).context("No gene_id in attributes")?;
+            let mut attr = attrs.split(|&c| c == b';');
+            let id = attr.find(|s| &s[0..8] == b"gene_id ")
+                .map(|s| &s[9..(s.len()-1)])
+                .ok_or_else(|| data_error(&line)).context("No gene_id in attributes")?;
 
             Ok(Some(GtfExon { seq_name, seq_type, start, end, strand, id}))
         } else {
@@ -65,18 +71,18 @@ impl<B: BufRead> GtfReader<B> {
     }
 }
 
-fn data_error(s: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, s)
+fn data_error(s: &[u8]) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, std::str::from_utf8(&s).unwrap())
 }
 
 #[derive(Debug)]
 pub struct GtfExon<'a> {
-    pub seq_name: &'a str,
-    pub seq_type: &'a str,
+    pub seq_name: &'a [u8],
+    pub seq_type: &'a [u8],
     pub start: i64,
     pub end: i64,
     pub strand: Strand,
-    pub id: &'a str
+    pub id: &'a [u8]
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -129,11 +135,11 @@ mod test {
         // two exons
         assert!(reader.advance_record().unwrap());
         let r = reader.parse_exon().unwrap().unwrap();
-        assert_eq!(r.id, "ENSG00000112592");
+        assert_eq!(r.id, b"ENSG00000112592");
 
         assert!(reader.advance_record().unwrap());
         let r = reader.parse_exon().unwrap().unwrap();
-        assert_eq!(r.id, "ENSG00000112592");
+        assert_eq!(r.id, b"ENSG00000112592");
 
         // and a CDS
         assert!(reader.advance_record().unwrap());

@@ -124,8 +124,8 @@ impl Interval for Exon {
 }
 
 pub struct GeneMap {
-    genes: IndexSet<String>,
-    seq_names: IndexSet<String>,
+    genes: IndexSet<Vec<u8>>,
+    seq_names: IndexSet<Vec<u8>>,
     intervals: Vec<NClist<Exon>>,
 }
 
@@ -133,7 +133,7 @@ impl GeneMap {
     pub fn from_gtf<P: AsRef<Path>>(p: P, tids: &Vec<String>) -> Result<GeneMap> {
         //open gtf
         let f = File::open(p)?;
-        let mut reader = GtfReader::new(BufReader::new(f));
+        let mut reader = GtfReader::new(BufReader::new(f))?;
 
         let mut genes = IndexSet::new();
         let mut seq_names = IndexSet::new();
@@ -146,10 +146,6 @@ impl GeneMap {
         loop {
             n += 1;
             gtfline.clear();
-            if !reader.advance_record()? {
-                break;
-            }
-
             if let Some(r) = reader.parse_exon()? {
 
                 let gene_idx = if !genes.contains(r.id) {
@@ -179,6 +175,9 @@ impl GeneMap {
                 // bam files are 0 based, and nclist expects half open
                 exons[chr_idx].push(Exon {id: gene_idx, strand: r.strand, range: r.start-1..r.end });
             }
+            if !reader.advance_record()? {
+                break;
+            }
         }
 
         //Create the NClists
@@ -199,7 +198,7 @@ impl GeneMap {
     }
 
     #[inline]
-    pub fn hit_name(&self, i: usize) -> Option<&String> {
+    pub fn hit_name(&self, i: usize) -> Option<&Vec<u8>> {
         self.genes.get_index(i)
     }
 
@@ -243,7 +242,7 @@ impl ReadMappings {
 
         let mut w = BufWriter::new(o);
         for (geneidx, &count) in self.hit.iter().enumerate() {
-            w.write_all(genes.hit_name(geneidx).unwrap().as_bytes())?;
+            w.write_all(genes.hit_name(geneidx).unwrap())?;
             w.write_all(&[b'\t'])?;
             itoa::write(&mut w, count)?;
             w.write_all(&[b'\n'])?;
