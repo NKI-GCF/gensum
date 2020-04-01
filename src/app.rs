@@ -218,7 +218,7 @@ pub struct ReadMappings {
     duplicated: usize,
     ambiguous: usize,
     ambiguous_pair: usize,
-    notinref: usize,
+    notingtf: usize,
     mapq: usize,
     nohit: usize,
     hit: Vec<usize>
@@ -253,7 +253,7 @@ impl ReadMappings {
         writeln!(w, "marked_duplicated\t{}", self.duplicated)?;
         writeln!(w, "ambiguous\t{}", self.ambiguous)?;
         writeln!(w, "ambiguous_pair\t{}", self.ambiguous_pair)?;
-        writeln!(w, "chr_not_in_ref\t{}", self.notinref)?;
+        writeln!(w, "chr_not_in_gtf\t{}", self.notingtf)?;
         writeln!(w, "nohit\t{}", self.nohit)?;
 
         Ok(())
@@ -278,7 +278,7 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
             }
         }).collect();
 
-    //quantify 
+    //quantify
     let mut delayed = HashMap::new();
     let mut counts = ReadMappings::new(genemap.genes.len());
 
@@ -334,8 +334,8 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
                     counts.count_hit(map_segments(&record, ref_chr_map, config));
                 }
             } else {
-                //no reference for this chr in the bam
-                counts.notinref += 1;
+                // this chr was not in the gtf
+                counts.notingtf += 1;
             }
     }
     Ok(counts)
