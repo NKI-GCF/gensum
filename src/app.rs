@@ -56,12 +56,11 @@ impl Strandness {
         if self == Strandness::Unstranded {
             return true;
         }
-        
+
         // Asuming a FR library ( --->____<--- )
         // Determine if fragment is forward
         let fragment_forward = if r.is_paired() {
-            (r.is_first_in_template() && !r.is_reverse()) ||
-                (r.is_last_in_template() && r.is_reverse())
+            if r.is_reverse() { r.is_last_in_template() } else { r.is_first_in_template() }
         } else {
             !r.is_reverse()
         };
@@ -188,8 +187,8 @@ impl GeneMap {
             v.dedup(); //deduplication saves around 50% because of comparable isoforms (and havanna entries)
             numexonsdd += v.len();
             NClist::from_vec(v)
-                .map_err(|_| anyhow!("Cannot create interval search list, all ranges must be > 1"))
-        }).collect::<Result<_, _>>()?;
+        }).collect::<Result<_, _>>()
+        .map_err(|_| anyhow!("Cannot create interval search list, all ranges must be > 1"))?;
 
         eprintln!("{} lines in GTF, parsed {} exons, {} unique geneid-exon ranges", n, numexons, numexonsdd);
 
