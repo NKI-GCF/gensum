@@ -10,7 +10,7 @@ use std::str::FromStr;
 use anyhow::{anyhow, Result};
 use indexmap::IndexSet;
 use itoa;
-use nclist::{NClist, Interval};
+use nclist::{NClist, Interval, Overlaps};
 use rust_htslib::bam::{self, record::Cigar, Reader, Read};
 use itertools::Itertools;
 
@@ -340,6 +340,30 @@ fn cigar_pos_ranger(c: Cigar, pos: &mut i64) -> Option<Range<i64>> {
             *pos += n as i64;
             None
         },
+    }
+}
+
+/// ambigous segments can be recued if a unique mapping is available from other segments
+fn strict_seghits(r: &bam::Record, ov: Overlaps<Exon>, o: &Range<i64>, strandness: Strandness) -> Option<SegmentHit> {
+
+    let mut unique_exon_ids = ov.filter(|e| o.start >= *e.start() && o.end <= *e.end())
+        .filter_map(|e| strandness.matches_bam_record(r, e))
+        .dedup();
+
+    match unique_exon_ids.next() {
+        None => Some(SegmentHit::Nohit),
+        some_id => some_id.xor(unique_exon_ids.next()).map(SegmentHit::Hit),
+    }
+}
+
+/// any part linking to a different gene makes the record ambiguous
+fn union_seghits(r: &bam::Record, ov: Overlaps<Exon>, strandness: Strandness) -> Option<SegmentHit> {
+
+    let mut unique_exon_ids = ov.filter_map(|e| strandness.matches_bam_record(r, e)).dedup();
+
+    match unique_exon_ids.next() {
+        None => None,
+        some_id => some_id.xor(unique_exon_ids.next()).map(SegmentHit::Hit).or(Some(SegmentHit::Ambiguous)),
     }
 }
 
