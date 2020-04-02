@@ -357,10 +357,11 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
             .filter_map(|e| strandness.matches_bam_record(r, e)).unique();
 
         // check that all overlapping exons map to the same gene
-        let segment_id = unique_exon_ids.next();
-
-        match segment_id {
-            Some(_id) => {
+        match unique_exon_ids.next() {
+            //strict requires al segments overlap the same gene
+            None if strict => return SegmentHit::Nohit,
+            None => {},
+            some_new_exon_id => {
                 if unique_exon_ids.next().is_some() {
                     if strict {
                         // in strict mode ambigous segments can be recued if a unique mapping is
@@ -370,22 +371,12 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
                     // in  union mode any part linking to a different gene makes it ambiguous
                     return SegmentHit::Ambiguous;
                 }
-            },
-            None => {
-                //strict requires al segments overlap the same gene
-                if strict {
-                    return SegmentHit::Nohit;
+                match target_id {
+                    None => target_id = some_new_exon_id,
+                    stored_id if stored_id != some_new_exon_id => return SegmentHit::Ambiguous,
+                    _ => {},
                 }
-            }
-        }
-
-        {
-            if target_id.is_some() && segment_id.is_some() && target_id != segment_id {
-                return SegmentHit::Ambiguous
-            }
-            if target_id.is_none() && segment_id.is_some() {
-                target_id = segment_id;
-            }
+            },
         }
     }
 
