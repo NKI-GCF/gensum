@@ -327,6 +327,22 @@ pub fn quantify_bam(mut bam: Reader, config: Config, genemap: &GeneMap, tid_map:
     Ok(counts)
 }
 
+/// use cigar line to filter the cigar to ranges that lie on the genome
+fn cigar_pos_ranger(c: Cigar, pos: &mut i64) -> Option<Range<i64>> {
+    match c {
+        Cigar::Match(n) | Cigar::Equal(n) | Cigar::Diff(n) => {
+            let s = *pos;
+            *pos += n as i64;
+            Some(s..*pos)
+        }
+        Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => None,
+        Cigar::Del(n) | Cigar::RefSkip(n) => {
+            *pos += n as i64;
+            None
+        },
+    }
+}
+
 fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentHit {
     //Store the first gene hit id
     let mut  target_id = None;
@@ -337,20 +353,8 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
 
     let mut pos = r.pos();
     // use cigar line to filter the cigar to ranges (o) that lie on the genome
-    for o in cigar.into_iter().filter_map(|c| {
-        match c {
-            Cigar::Match(n) | Cigar::Equal(n) | Cigar::Diff(n) => {
-                let s = pos;
-                pos += *n as i64;
-                Some(s..pos)
-            }
-            Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => None,
-            Cigar::Del(n) | Cigar::RefSkip(n) => {
-                pos += *n as i64;
-                None
-            },
-        }
-    }) {
+    for o in cigar.into_iter().filter_map(|&c| cigar_pos_ranger(c, &mut pos)) {
+
         //match this segment's genomic region to exons and filter based on program configuration
         let mut unique_exon_ids = map.overlaps(&o)
             .filter(|e| !strict || (o.start >= *e.start() && o.end <= *e.end()))
