@@ -360,8 +360,8 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
         let segment_id = unique_exon_ids.next();
         let segment_ambiguous = unique_exon_ids.next().is_some();
 
-        if segment_id.is_some() {
-            if let Some(_id) = segment_id {
+        match segment_id {
+            Some(_id) => {
                 if !strict && segment_ambiguous {
                     // in  union mode any part linking to a different gene makes it ambiguous
                     return SegmentHit::Ambiguous;
@@ -369,12 +369,13 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
                     // in strict mode ambigous segments can be recued if a unique mapping is 
                     // available from other segments
                 }
+            },
+            None => {
+                //strict requires al segments overlap the same gene
+                if strict {
+                    return SegmentHit::Nohit;
+                }
             }
-        }
-
-        //strict requires al segments overlap the same gene
-        if strict && segment_id.is_none() {
-            return SegmentHit::Nohit;
         }
 
         if !segment_ambiguous {
