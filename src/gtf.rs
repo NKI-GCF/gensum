@@ -36,33 +36,33 @@ impl<B: BufRead> GtfReader<B> {
     pub fn parse_exon(&self) -> Result<Option<GtfExon>> {
         let line = &self.last_line;
         let mut s = line.split(|&c| c == b'\t');
-        let seq_name = s.next().ok_or_else(|| data_error(&line))?;
+        let seq_name = s.next().ok_or_else(|| data_error(line))?;
         //eprintln!("chr {}", seq_name);
         //skip source
-        let seq_type = s.nth(1).ok_or_else(|| data_error(&line))?;
+        let seq_type = s.nth(1).ok_or_else(|| data_error(line))?;
         //eprintln!("type {}", seq_type);
         if seq_type == b"exon" {
             let start = s.next()
-                .map(|u| std::str::from_utf8(&u)).transpose()?
-                .ok_or_else(|| data_error(&line))?
+                .map(|u| std::str::from_utf8(u)).transpose()?
+                .ok_or_else(|| data_error(line))?
                 .parse().context("Invalid start")?;
             let end = s.next()
-                .map(|u| std::str::from_utf8(&u)).transpose()?
-                .ok_or_else(|| data_error(&line))?
+                .map(|u| std::str::from_utf8(u)).transpose()?
+                .ok_or_else(|| data_error(line))?
                 .parse().context("Invalid end")?;
             let strand = s.nth(1)
-                .map(|u| std::str::from_utf8(&u)).transpose()?
-                .ok_or_else(|| data_error(&line))?
-                .parse().map_err(|_| data_error(&line)).context("Invalid strand")?;
+                .map(|u| std::str::from_utf8(u)).transpose()?
+                .ok_or_else(|| data_error(line))?
+                .parse().map_err(|_| data_error(line)).context("Invalid strand")?;
 
-            let attrs = s.nth(1).ok_or_else(|| data_error(&line)).context("No attributes")?;
+            let attrs = s.nth(1).ok_or_else(|| data_error(line)).context("No attributes")?;
             //eprintln!("attr {}", attrs);
 
             // split attrs on ';'
             let mut attr = attrs.split(|&c| c == b';');
-            let id = attr.find(|s| &s[0..8] == b"gene_id ")
-                .map(|s| &s[9..(s.len()-1)])
-                .ok_or_else(|| data_error(&line)).context("No gene_id in attributes")?;
+            let id = attr.find(|s| s.starts_with(b"gene_id "))
+                .and_then(|s| s.get(9..(s.len()-1)))
+                .ok_or_else(|| data_error(line)).context("No gene_id in attributes or truncated")?;
 
             Ok(Some(GtfExon { seq_name, seq_type, start, end, strand, id}))
         } else {
@@ -72,7 +72,7 @@ impl<B: BufRead> GtfReader<B> {
 }
 
 fn data_error(s: &[u8]) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, std::str::from_utf8(&s).unwrap())
+    io::Error::new(io::ErrorKind::InvalidData, std::str::from_utf8(s).unwrap())
 }
 
 #[derive(Debug)]
