@@ -52,9 +52,9 @@ pub enum Strandness {
 
 impl Strandness {
     #[inline]
-    fn matches_bam_record(self, r: &bam::Record, target: Strand) -> bool {
+    fn matches_bam_record(self, r: &bam::Record, exon: &Exon) -> Option<usize> {
         if self == Strandness::Unstranded {
-            return true;
+            return Some(exon.id);
         }
 
         // Asuming a FR library ( --->____<--- )
@@ -65,12 +65,12 @@ impl Strandness {
             !r.is_reverse()
         };
 
-        match (self, target) {
-            (_, Strand::Unknown) => true,
+        match (self, exon.strand) {
+            (_, Strand::Unknown) => Some(exon.id),
             (Strandness::Forward, Strand::Forward) |
-            (Strandness::Reverse, Strand::Reverse) => fragment_forward,
+            (Strandness::Reverse, Strand::Reverse) => if fragment_forward {Some(exon.id)} else {None},
             (Strandness::Forward, Strand::Reverse) |
-            (Strandness::Reverse, Strand::Forward) => !fragment_forward,
+            (Strandness::Reverse, Strand::Forward) => if fragment_forward {None} else {Some(exon.id)},
             (Strandness::Unstranded, _) => unreachable!(),
         }
     }
@@ -353,27 +353,27 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
         }
     }) {
         //match this segment's genomic region to exons and filter based on program configuration
-        let exons =  map.overlaps(&o)
+        let exon_ids = map.overlaps(&o)
             .filter(|e| !strict || (o.start >= *e.start() && o.end <= *e.end()))
-            .filter(|e| strandness.matches_bam_record(r, e.strand));
+            .filter_map(|e| strandness.matches_bam_record(r, e));
 
         // check that all overlapping exons map to the same gene
         let mut segment_ambiguous = false;
         let mut segment_id = None;
 
-        for exon in exons {
+        for exon_id in exon_ids {
             if let Some(id) = segment_id {
-                if !strict && (id != exon.id) {
+                if !strict && (id != exon_id) {
                     // in  union mode any part linking to a different gene makes it ambiguous
                     return SegmentHit::Ambiguous;
-                } else if strict && id != exon.id {
+                } else if strict && id != exon_id {
                     // in strict mode ambigous segments can be recued if a unique mapping is 
                     // available from other segments
                     segment_ambiguous = true;
                     break;
                 } 
             } else {
-                segment_id = Some(exon.id)
+                segment_id = Some(exon_id)
             }
         }
 
