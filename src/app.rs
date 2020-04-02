@@ -336,24 +336,22 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
     let strict = config.method == QuantMethod::Strict;
     let strandness = config.strandness;
 
+    let mut pos = r.pos();
     // use cigar line to filter the cigar to ranges (o) that lie on the genome
-    for o in cigar.into_iter().scan(r.pos(), |pos, c| {
+    for o in cigar.into_iter().filter_map(|c| {
         match c {
-            Cigar::Del(n) | Cigar::RefSkip(n) => {
-                *pos += *n as i64;
-                Some(None)
-            },
-            Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => {
-                Some(None)
-            },
             Cigar::Match(n) | Cigar::Equal(n) | Cigar::Diff(n) => {
-                let r = *pos..*pos + *n as i64;
-                *pos += *n as i64;
-                Some(Some(r))
+                let s = pos;
+                pos += *n as i64;
+                Some(s..pos)
             }
+            Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => None,
+            Cigar::Del(n) | Cigar::RefSkip(n) => {
+                pos += *n as i64;
+                None
+            },
         }
-    }).filter_map(|c| c)
-    {
+    }) {
         //match this segment's genomic region to exons and filter based on program configuration
         let exons =  map.overlaps(&o)
             .filter(|e| !strict || (o.start >= *e.start() && o.end <= *e.end()))
