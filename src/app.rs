@@ -12,6 +12,7 @@ use indexmap::IndexSet;
 use itoa;
 use nclist::{NClist, Interval};
 use rust_htslib::bam::{self, record::Cigar, Reader, Read};
+use itertools::Itertools;
 
 use crate::gtf::{GtfReader, Strand};
 
@@ -326,8 +327,6 @@ pub fn quantify_bam(mut bam: Reader, config: Config, genemap: &GeneMap, tid_map:
     Ok(counts)
 }
 
-
-
 fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentHit {
     //Store the first gene hit id
     let mut  target_id = None;
@@ -353,27 +352,23 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
         }
     }) {
         //match this segment's genomic region to exons and filter based on program configuration
-        let exon_ids = map.overlaps(&o)
+        let mut unique_exon_ids = map.overlaps(&o)
             .filter(|e| !strict || (o.start >= *e.start() && o.end <= *e.end()))
-            .filter_map(|e| strandness.matches_bam_record(r, e));
+            .filter_map(|e| strandness.matches_bam_record(r, e)).unique();
 
         // check that all overlapping exons map to the same gene
-        let mut segment_ambiguous = false;
-        let mut segment_id = None;
+        let segment_id = unique_exon_ids.next();
+        let segment_ambiguous = unique_exon_ids.next().is_some();
 
-        for exon_id in exon_ids {
-            if let Some(id) = segment_id {
-                if !strict && (id != exon_id) {
+        if segment_id.is_some() {
+            if let Some(_id) = segment_id {
+                if !strict && segment_ambiguous {
                     // in  union mode any part linking to a different gene makes it ambiguous
                     return SegmentHit::Ambiguous;
-                } else if strict && id != exon_id {
+
                     // in strict mode ambigous segments can be recued if a unique mapping is 
                     // available from other segments
-                    segment_ambiguous = true;
-                    break;
-                } 
-            } else {
-                segment_id = Some(exon_id)
+                }
             }
         }
 

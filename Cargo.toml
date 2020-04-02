@@ -14,5 +14,5 @@ indexmap = "1.3.2"
 clap = "2.33.0"
 itoa = "0.4.5"
 either = "1.5.3"
-
+itertools = "0.9.0"
 
