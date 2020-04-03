@@ -67,12 +67,12 @@ impl Strandness {
         };
 
         match (self, target) {
-            (Strandness::Unstranded, _) => unreachable!(),
             (_, Strand::Unknown) => true,
             (Strandness::Forward, Strand::Forward) |
             (Strandness::Reverse, Strand::Reverse) => fragment_forward,
             (Strandness::Forward, Strand::Reverse) |
             (Strandness::Reverse, Strand::Forward) => !fragment_forward,
+            (Strandness::Unstranded, _) => unreachable!(),
         }
     }
 }
@@ -270,13 +270,7 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
     let header = bam.header();
     let tid_map: Vec<_> = header.target_names().iter()
         .map(|v| String::from_utf8_lossy(v))
-        .map(|name| {
-            if let Some(idx) = genemap.seq_names.iter().position(|n| name == n.as_ref()) {
-                Some(idx)
-            } else {
-                None
-            }
-        }).collect();
+        .map(|name| genemap.seq_names.iter().position(|n| name == n.as_ref())).collect();
 
     //quantify
     let mut delayed = HashMap::new();
