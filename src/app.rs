@@ -368,45 +368,26 @@ fn union_seghits(r: &bam::Record, ov: Overlaps<Exon>, strandness: Strandness) ->
 }
 
 fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentHit {
-    //Store the first gene hit id
-    let mut  target_id = None;
     let cigar = r.cigar();
 
-    let strict = config.method == QuantMethod::Strict;
+    let method = config.method;
     let strandness = config.strandness;
 
     let mut pos = r.pos();
-    // use cigar line to filter the cigar to ranges (o) that lie on the genome
-    for o in cigar.into_iter().filter_map(|&c| cigar_pos_ranger(c, &mut pos)) {
+    let mut it = cigar.into_iter().filter_map(|&c| cigar_pos_ranger(c, &mut pos))
+        .filter_map(|ref o| match method {
+            QuantMethod::Strict => strict_seghits(r, map.overlaps(o), o, strandness),
+            QuantMethod::Union => union_seghits(r, map.overlaps(o), strandness),
+        }).dedup();
 
-        //match this segment's genomic region to exons and filter based on program configuration
-        let mut unique_exon_ids = map.overlaps(&o)
-            .filter(|e| !strict || (o.start >= *e.start() && o.end <= *e.end()))
-            .filter_map(|e| strandness.matches_bam_record(r, e)).unique();
-
-        // check that all overlapping exons map to the same gene
-        match unique_exon_ids.next() {
-            //strict requires al segments overlap the same gene
-            None if strict => return SegmentHit::Nohit,
-            Some(_id) if unique_exon_ids.next().is_some() => {
-                if strict {
-                    // in strict mode ambigous segments can be recued if a unique mapping is
-                    // available from other segments
-                    continue;
-                }
-                // in  union mode any part linking to a different gene makes it ambiguous
-                return SegmentHit::Ambiguous;
-            },
-            Some(id) if target_id.is_none() => target_id = Some(id),
-            Some(id) if target_id != Some(id) => return SegmentHit::Ambiguous,
-            _ => {},
+    match it.next() {
+        Some(SegmentHit::Hit(id)) => match it.next() {
+            None => SegmentHit::Hit(id),
+            Some(SegmentHit::Nohit) => SegmentHit::Nohit,
+            _ => SegmentHit::Ambiguous,
         }
-    }
-
-    if let Some(id) = target_id {
-        SegmentHit::Hit(id)
-    } else {
-        SegmentHit::Nohit
+        Some(SegmentHit::Ambiguous) => SegmentHit::Ambiguous,
+        _ => SegmentHit::Nohit,
     }
 }
 
