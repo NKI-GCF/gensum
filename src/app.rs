@@ -5,6 +5,7 @@ use std::ops::Range;
 use std::path::Path;
 use std::cmp::{Ord, PartialOrd, Ordering};
 use std::str::FromStr;
+use std::time::Instant;
 
 
 use anyhow::{anyhow, Result};
@@ -13,7 +14,7 @@ use itoa;
 use nclist::{NClist, Interval};
 use rust_htslib::{bam, bam::Read, bam::record::Cigar};
 
-use crate::gtf::{GtfReader, Strand};
+use crate::gtf::{GtfReader, GtfRecord, Strand};
 
 
 #[derive(Debug, Copy, Clone)]
@@ -124,7 +125,7 @@ impl Interval for Exon {
     }
 }
 
-fn get_index_or_insert_owned(map: &mut IndexSet<String>, v: &str) -> usize {
+fn get_index_or_insert_owned(map: &mut IndexSet<Vec<u8>>, v: &[u8]) -> usize {
     if !map.contains(v) {
         map.insert_full(v.to_owned()).0
     } else {
@@ -133,14 +134,15 @@ fn get_index_or_insert_owned(map: &mut IndexSet<String>, v: &str) -> usize {
 }
 
 pub struct GeneMap {
-    genes: IndexSet<String>,
-    seq_names: IndexSet<String>,
+    genes: IndexSet<Vec<u8>>,
+    seq_names: IndexSet<Vec<u8>>,
     intervals: Vec<NClist<Exon>>,
 }
 
 impl GeneMap {
     pub fn from_gtf<P: AsRef<Path>>(p: P) -> Result<GeneMap> {
         //open gtf
+        let t0 = Instant::now();
         let f = File::open(p)?;
         let mut reader = GtfReader::new(BufReader::new(f));
         
@@ -150,22 +152,20 @@ impl GeneMap {
 
 
         //iterate records
-        let mut gtfline = String::new();
+        let mut record = GtfRecord::new();
         let mut n = 0;
         loop {
-            n += 1;
-            gtfline.clear();
-            if !reader.advance_record()? {
+            if reader.read_record(&mut record)? == 0 {
                 break;
             }
+            n += 1;
 
-            if let Some(r) = reader.parse_exon()? {
-
+            if let Some(r) = record.parse_exon()? {
                 let gene_idx = get_index_or_insert_owned(&mut genes, r.id);
                 let chr_idx = get_index_or_insert_owned(&mut seq_names, r.seq_name);
 
                  if r.end - r.start < 0 {
-                     eprintln!("Yikes: {} {} {}", r.start, r.end, gtfline);
+                     eprintln!("Skipping zero/negative width exon: {}", record);
                      continue;
                  }
 
@@ -178,26 +178,28 @@ impl GeneMap {
                 exons[chr_idx].push(Exon {id: gene_idx, strand: r.strand, range: r.start-1..r.end });
             }
         }
+        let gtftime = t0.elapsed();
 
         //Create the NClists
         let mut numexons = 0;
         let mut numexonsdd = 0;
-        let intervals = exons.into_iter().map(|mut v| {
-            numexons += v.len();
-            v.sort();
-            v.dedup(); //deduplication saves around 50% because of comparable isoforms (and havanna entries)
+        let intervals = exons.into_iter()
+            .map(|mut v| {
+                numexons += v.len();
+                v.sort();
+                v.dedup(); //deduplication saves around 50% because of comparable isoforms (and havanna entries)
             numexonsdd += v.len();
-            NClist::from_vec(v)
-                .map_err(|_| anyhow!("Cannot create interval search list, all ranges must be > 1"))
-        }).collect::<Result<_, _>>()?;
+            NClist::from_vec(v) })
+            .collect::<Result<_, _>>()
+            .map_err(|_| anyhow!("Cannot create interval search list, all ranges must be > 1"))?;
 
-        eprintln!("{} lines in GTF, parsed {} exons, {} unique geneid-exon ranges", n, numexons, numexonsdd);
+        eprintln!("{} lines in GTF, parsed {} exons, {} unique geneid-exon ranges ({:?})", n, numexons, numexonsdd, gtftime);
 
         Ok(GeneMap { genes, seq_names, intervals })
     }
 
     #[inline]
-    pub fn hit_name(&self, i: usize) -> Option<&String> {
+    pub fn hit_name(&self, i: usize) -> Option<&Vec<u8>> {
         self.genes.get_index(i)
     }
 
@@ -241,7 +243,7 @@ impl ReadMappings {
 
         let mut w = BufWriter::new(o);
         for (geneidx, &count) in self.hit.iter().enumerate() {
-            w.write_all(genes.hit_name(geneidx).unwrap().as_bytes())?;
+            w.write_all(genes.hit_name(geneidx).unwrap())?;
             w.write_all(&[b'\t'])?;
             itoa::write(&mut w, count)?;
             w.write_all(&[b'\n'])?;
@@ -269,8 +271,7 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
     //intersect header chr list with rr
     let header = bam.header();
     let tid_map: Vec<_> = header.target_names().iter()
-        .map(|v| String::from_utf8_lossy(v))
-        .map(|name| genemap.seq_names.iter().position(|n| name == n.as_ref())).collect();
+        .map(|name| genemap.seq_names.iter().position(|n| name == &n.as_slice())).collect();
 
     //quantify
     let mut delayed = HashMap::new();

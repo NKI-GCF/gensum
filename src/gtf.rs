@@ -1,82 +1,106 @@
-use std::io::{self, BufRead};
-use std::str::FromStr;
+use std::convert::TryFrom;
+use std::io::{self, Read, BufRead, BufReader};
 
 use anyhow::{Result, Context};
+use atoi::atoi;
 
-pub struct GtfReader<B> {
-    r: B,
-    last_line: String,
+pub struct GtfReader<R> {
+    reader: BufReader<R>,
 }
 
-impl<B: BufRead> GtfReader<B> {
-    pub fn new(r: B) -> GtfReader<B> {
-        GtfReader { r, last_line: String::new() }
+impl<R: Read> GtfReader<R> {
+    pub fn new(r: R) -> GtfReader<R> {
+        let reader = BufReader::new(r);
+        GtfReader { reader }
     }
 
-    /// consume from the buffreader until a record line is read
-    pub fn advance_record(&mut self) -> io::Result<bool> {
+    pub fn read_record(&mut self, record: &mut GtfRecord) -> io::Result<usize> {
         loop {
-            self.last_line.clear();
-            match self.r.read_line(&mut self.last_line)? {
-                0 => return Ok(false),
-                _ if self.last_line.starts_with('#') => {},
-                _ => break
+            let n = self.reader.read_until(b'\n', record.clear_buf_mut())?;
+            if !record.is_comment() {
+                break Ok(n);
             }
         }
-        Ok(true)
+    }
+}
+
+pub struct GtfRecord(Vec<u8>);
+
+impl GtfRecord {
+    pub fn new() -> GtfRecord {
+        GtfRecord(Vec::new())
     }
 
-    /// attempt to parse the current GTF line as an exon
+    fn clear_buf_mut(&mut self) -> &mut Vec<u8> {
+        self.0.clear();
+        &mut self.0
+    }
+
+    pub fn is_comment(&self) -> bool {
+        self.0.first() == Some(&b'#')
+    }
+
+    /// attempt to parse the current GTF record as an exon
     /// Returns None for any other type
     /// Fails when unable to parse or required attributes (gene_id)
     /// are not present
     pub fn parse_exon(&self) -> Result<Option<GtfExon>> {
-        let line = self.last_line.as_str();
-        let mut s = line.split('\t');
-        let seq_name = s.next().ok_or_else(|| data_error(line))?;
-        //eprintln!("chr {}", seq_name);
+        let mut s = self.0.split(|&b| b == b'\t');
+        let seq_name = s.next()
+            .ok_or_else(|| data_error(&self.0))
+            .context("No seqname in gtf line")?;
         //skip source
-        let seq_type = s.nth(1).ok_or_else(|| data_error(line))?;
+        let seq_type = s.nth(1)
+            .ok_or_else(|| data_error(&self.0))
+            .context("No seqtype in gtf line")?;
         //eprintln!("type {}", seq_type);
-        if seq_type == "exon" {
-            let start = s.next()
-                .ok_or_else(|| data_error(line))?
-                .parse().context("Invalid start")?;
-            let end = s.next()
-                .ok_or_else(|| data_error(line))?
-                .parse().context("Invalid end")?;
+        if seq_type == b"exon" {
+            let start = s.next().and_then(atoi)
+                .ok_or_else(|| data_error(&self.0))
+                .context("Invalid start")?;
+            let end = s.next().and_then(atoi)
+                .ok_or_else(|| data_error(&self.0))
+                .context("Invalid end")?;
             let strand = s.nth(1)
-                .ok_or_else(|| data_error(line))?
-                .parse().map_err(|_| data_error(line)).context("Invalid strand")?;
+                .ok_or_else(|| "No strand")
+                .and_then(Strand::try_from)
+                .map_err(|_| data_error(&self.0))
+                .context("Invalid strand")?;
 
-            let attrs = s.nth(1).ok_or_else(|| data_error(line)).context("No attributes")?;
-            //eprintln!("attr {}", attrs);
+            let attrs = s.nth(1).ok_or_else(|| data_error(&self.0)).context("No attributes")?;
 
             // split attrs on ';'
-            let mut attr = attrs.split(';');
-            let id = attr.find(|s| s.starts_with("gene_id "))
-                .map(|s| s.split_at(9).1.trim_matches('"'))
-                .ok_or_else(|| data_error(line)).context("No gene_id in attributes")?;
+            // in the ensembl gtf the gene_id is the first entry so this is not
+            // really necessary.
+            let mut attr = attrs.split(|&b| b == b';');
+            let id = attr.find(|s| s.starts_with(b"gene_id "))
+                .map(|s| &s[9..s.len()-1])
+                .ok_or_else(|| data_error(&self.0)).context("No gene_id in attributes")?;
 
-            Ok(Some(GtfExon { seq_name, seq_type, start, end, strand, id}))
+            Ok(Some(GtfExon { seq_name, start, end, strand, id}))
         } else {
             Ok(None)
         }
     }
 }
 
-fn data_error(s: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, s)
+impl std::fmt::Display for GtfRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(&self.0))
+    }
+}
+
+fn data_error(s: &[u8]) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, String::from_utf8_lossy(s))
 }
 
 #[derive(Debug)]
 pub struct GtfExon<'a> {
-    pub seq_name: &'a str,
-    pub seq_type: &'a str,
+    pub seq_name: &'a [u8],
     pub start: i64,
     pub end: i64,
     pub strand: Strand,
-    pub id: &'a str
+    pub id: &'a [u8]
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -86,13 +110,13 @@ pub enum Strand {
     Unknown
 }
 
-impl FromStr for Strand {
-    type Err = &'static str;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl TryFrom<&[u8]> for Strand {
+    type Error = &'static str;
+    fn try_from(s: &[u8]) -> Result<Self, Self::Error> {
         match s {
-            "+" => Ok(Strand::Forward),
-            "-" => Ok(Strand::Reverse),
-            "." => Ok(Strand::Unknown),
+            b"+" => Ok(Strand::Forward),
+            b"-" => Ok(Strand::Reverse),
+            b"." => Ok(Strand::Unknown),
             _ => Err("GTF strand not +/-/.")
         }
     }
@@ -103,7 +127,7 @@ impl FromStr for Strand {
 mod test {
     use std::io::Cursor;
 
-    use super::GtfReader;
+    use super::*;
 
     const GTF:&str = r#"#!genome-build GRCh38.p12
 6	ensembl_havana	gene	170554302	170572870	.	+	.	gene_id "ENSG00000112592"; gene_version "13"; gene_name "TBP"; gene_source "ensembl_havana"; gene_biotype "protein_coding";
@@ -117,31 +141,29 @@ mod test {
     #[test]
     fn read() {
         let mut reader = GtfReader::new(Cursor::new(GTF));
+        let mut record = GtfRecord::new();
 
         //gene entry
-        assert!(reader.advance_record().unwrap());
-        assert!(reader.parse_exon().unwrap().is_none());
+        assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
+        assert!(matches!(record.parse_exon(), Ok(None)));
 
         //transcript entry
-        assert!(reader.advance_record().unwrap());
-        assert!(reader.parse_exon().unwrap().is_none());
+        assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
+        assert!(matches!(record.parse_exon(), Ok(None)));
 
         // two exons
-        assert!(reader.advance_record().unwrap());
-        let r = reader.parse_exon().unwrap().unwrap();
-        assert_eq!(r.id, "ENSG00000112592");
+        assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
+        assert!(matches!(record.parse_exon(), Ok(Some(r)) if r.id == b"ENSG00000112592"));
 
-        assert!(reader.advance_record().unwrap());
-        let r = reader.parse_exon().unwrap().unwrap();
-        assert_eq!(r.id, "ENSG00000112592");
+        assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
+        assert!(matches!(record.parse_exon(), Ok(Some(r)) if r.id == b"ENSG00000112592"));
 
         // and a CDS
-        assert!(reader.advance_record().unwrap());
-        assert!(reader.parse_exon().unwrap().is_none());
+        assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
+        assert!(matches!(record.parse_exon(), Ok(None)));
 
         //EOF
-        assert!(!reader.advance_record().unwrap());
-
+        assert!(matches!(reader.read_record(&mut record), Ok(0)));
     }
 }
 
