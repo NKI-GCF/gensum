@@ -5,7 +5,7 @@ Counts reads on genes. Fast. Inspired by htseq-count `GenSum` support two
 quantification methods: union and strict, which are compatible with
 `htseq-count` `union` and `intersection-strict`. `GenSum` and `htseq-count` produce
 identical counts in the union mode, and minor differences in strict mode (1 in
-35000 reads). `GeSum` is much much faster. A 15 million read `bam` file can be
+35000 reads). `GenSum` is much much faster. A 15 million read `bam` file can be
 quantified in around 5s while `htseq-count` takes about 11 minutes.
 
 ## Installation
