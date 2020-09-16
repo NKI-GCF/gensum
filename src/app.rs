@@ -1,6 +1,5 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufReader, Write, BufWriter};
+use std::io::{Write, BufWriter};
 use std::ops::Range;
 use std::path::Path;
 use std::cmp::{Ord, PartialOrd, Ordering};
@@ -17,13 +16,14 @@ use rust_htslib::{bam, bam::Read, bam::record::Cigar};
 use crate::gtf::{GtfReader, GtfRecord, Strand};
 
 
+
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
     pub usedups: bool,
     pub nosingletons: bool,
     pub mapq: u8,
     pub method: QuantMethod,
-    pub strandness: Strandness
+    pub strandness: Strandness,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -143,8 +143,8 @@ impl GeneMap {
     pub fn from_gtf<P: AsRef<Path>>(p: P) -> Result<GeneMap> {
         //open gtf
         let t0 = Instant::now();
-        let f = File::open(p)?;
-        let mut reader = GtfReader::new(BufReader::new(f));
+        let (r, _compression) = niffler::from_path(p)?;
+        let mut reader = GtfReader::new(r);
         
         let mut genes = IndexSet::new();
         let mut seq_names = IndexSet::new();
