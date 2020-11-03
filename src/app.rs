@@ -251,6 +251,7 @@ impl ReadMappings {
 
         writeln!(w, "qc_failed\t{}", self.qc_failed)?;
         writeln!(w, "unmapped\t{}", self.unmapped)?;
+        writeln!(w, "low_mapq\t{}", self.mapq)?;
         writeln!(w, "secondary_alignments\t{}", self.secondary)?;
         writeln!(w, "marked_duplicated\t{}", self.duplicated)?;
         writeln!(w, "ambiguous\t{}", self.ambiguous)?;
