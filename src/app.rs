@@ -278,7 +278,6 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
     let mut delayed = HashMap::new();
     let mut counts = ReadMappings::new(genemap.genes.len());
 
-
     for record in bam.records() {
         let record = record?;
             if record.is_unmapped() {
@@ -317,7 +316,7 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
                             let m1 = map_segments(&record, ref_chr_map, config);
                             let m2 = map_segments(&mate, ref_chr_map, config);
                             if m1 == m2 {
-                                counts.count_hit(map_segments(&record, ref_chr_map, config));
+                                counts.count_hit(m1);
                             } else {
                                 counts.ambiguous_pair += 1;
                             }
@@ -336,8 +335,6 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
     }
     Ok(counts)
 }
-
-
 
 fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentHit {
     //Store the first gene hit id
@@ -411,6 +408,4 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
         SegmentHit::Nohit
     }
 }
-
-
 

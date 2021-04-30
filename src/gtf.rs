@@ -122,7 +122,6 @@ impl TryFrom<&[u8]> for Strand {
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use std::io::Cursor;
@@ -166,5 +165,4 @@ mod test {
         assert!(matches!(reader.read_record(&mut record), Ok(0)));
     }
 }
-
 
