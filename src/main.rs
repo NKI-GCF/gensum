@@ -106,7 +106,7 @@ fn main() -> Result<()> {
         res.write(o, &gm)?;
     } else {
         let stdout = io::stdout();
-        stdout.lock();
+        let stdout = stdout.lock();
         res.write(stdout, &gm)?;
     }
 

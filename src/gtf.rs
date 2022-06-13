@@ -62,7 +62,7 @@ impl GtfRecord {
                 .ok_or_else(|| data_error(&self.0))
                 .context("Invalid end")?;
             let strand = s.nth(1)
-                .ok_or_else(|| "No strand")
+                .ok_or("No strand")
                 .and_then(Strand::try_from)
                 .map_err(|_| data_error(&self.0))
                 .context("Invalid strand")?;

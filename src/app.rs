@@ -9,7 +9,6 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Result};
 use indexmap::IndexSet;
-use itoa;
 use nclist::{NClist, Interval};
 use rust_htslib::{bam, bam::Read, bam::record::Cigar};
 
@@ -360,7 +359,7 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
                 Some(Some(r))
             }
         }
-    }).filter_map(|c| c)
+    }).flatten()
     {
         //match this segment's genomic region to exons and filter based on program configuration
         let exons =  map.overlaps(&o)
