@@ -264,7 +264,10 @@ impl ReadMappings {
 
 pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneMap) -> Result<ReadMappings> {
     //open bam
-    let mut bam = bam::Reader::from_path(bam_file)?;
+    let mut bam = match bam_file.as_ref().to_str() {
+        Some("/dev/stdin") | Some("-") => bam::Reader::from_stdin()?,
+        _ => bam::Reader::from_path(bam_file)?,
+    };
     // test from command line show improve until 4 cpu's
     bam.set_threads(4)?;
 
