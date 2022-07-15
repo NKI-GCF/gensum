@@ -18,7 +18,7 @@ cargo build --release
 ```
 
 ## Docker containers
-Docker containers for gensum can be found on [dockerhub](https://hub.docker.com/repository/docker/nkigcf/gensum) and [ghcr](https://github.com/nki-gcf/gensum/pkgs/container/).
+Docker containers for gensum can be found on [dockerhub](https://hub.docker.com/repository/docker/nkigcf/gensum) and [ghcr](https://github.com/nki-gcf/gensum/pkgs/container/gensum).
 
 
 ## Input
