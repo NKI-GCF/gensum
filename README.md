@@ -17,6 +17,10 @@ cargo build --release
 ./target/release/gensum --help
 ```
 
+## Docker containers
+Docker containers for gensum can be found on [dockerhub](https://hub.docker.com/repository/docker/nkigcf/gensum) and [ghcr](https://github.com/nki-gcf/gensum/pkgs/container/).
+
+
 ## Input
 Required input is a GTF file that contains the exons and the gene-ids. `GenSum`
 uses a very naive parser to extract only 'exon' features. The GTF exon features
