@@ -6,26 +6,16 @@ use std::cmp::{Ord, PartialOrd, Ordering};
 use std::str::FromStr;
 use std::time::Instant;
 
+use clap::ValueEnum;
 
 use anyhow::{anyhow, Result};
 use indexmap::IndexSet;
 use nclist::{NClist, Interval};
 use rust_htslib::{bam, bam::Read, bam::record::Cigar};
 
-use crate::gtf::{GtfReader, GtfRecord, Strand};
+use crate::{Config, gtf::{GtfReader, GtfRecord, Strand}};
 
-
-
-#[derive(Debug, Copy, Clone)]
-pub struct Config {
-    pub usedups: bool,
-    pub nosingletons: bool,
-    pub mapq: u8,
-    pub method: QuantMethod,
-    pub strandness: Strandness,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(ValueEnum, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum QuantMethod {
     Union,
     Strict
@@ -42,8 +32,7 @@ impl FromStr for QuantMethod {
     }
 }
 
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(ValueEnum, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Strandness {
     Forward,
     Reverse,
@@ -230,11 +219,11 @@ impl ReadMappings {
         ReadMappings { hit: vec![0; n], ..Default::default() }
     }
 
-    fn count_hit(&mut self, h: SegmentHit) {
+    fn count_hit(&mut self, h: &SegmentHit) {
         match h {
             SegmentHit::Nohit => self.nohit += 1,
             SegmentHit::Ambiguous => self.ambiguous += 1,
-            SegmentHit::Hit(id) => self.hit[id] += 1,
+            SegmentHit::Hit(id) => self.hit[*id] += 1,
         }
     }
 
@@ -262,11 +251,11 @@ impl ReadMappings {
     }
 }
 
-pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneMap) -> Result<ReadMappings> {
+pub fn quantify_bam(config: &Config, genemap: &GeneMap) -> Result<ReadMappings> {
     //open bam
-    let mut bam = match bam_file.as_ref().to_str() {
-        Some("/dev/stdin") | Some("-") => bam::Reader::from_stdin()?,
-        _ => bam::Reader::from_path(bam_file)?,
+    let mut bam = match config.bam.as_str() {
+        "/dev/stdin" | "-" => bam::Reader::from_stdin()?,
+        b => bam::Reader::from_path(b)?,
     };
     // test from command line show improve until 4 cpu's
     bam.set_threads(4)?;
@@ -289,8 +278,9 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
 
             if record.is_quality_check_failed() {
                 counts.qc_failed += 1;
+                continue;
             }
-            if record.is_secondary() || record.is_supplementary() {
+            if record.is_secondary() || (record.is_supplementary() && !config.use_supplementary) {
                 counts.secondary += 1;
                 continue;
             }
@@ -308,27 +298,27 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
             if let Some(ref_chr_id) = tid_map[record.tid() as usize] {
                 let ref_chr_map = &genemap.intervals[ref_chr_id];
                 if record.is_paired() {
-                    if record.is_mate_unmapped() && !config.nosingletons {
-                        counts.count_hit(map_segments(&record, ref_chr_map, config));
-                    } else {
-                        //is the mate on the same chromosome? if not than this read pair is ambiguous
-                        if record.tid() != record.mtid() {
-                            counts.ambiguous_pair += 1;
-                        } else if let Some(mate) = delayed.remove(record.qname()) {
-                            let m1 = map_segments(&record, ref_chr_map, config);
-                            let m2 = map_segments(&mate, ref_chr_map, config);
-                            if m1 == m2 {
-                                counts.count_hit(m1);
-                            } else {
-                                counts.ambiguous_pair += 1;
-                            }
-                        } else {
-                            delayed.insert(record.qname().to_vec(), record);
+                    if record.is_mate_unmapped() {
+                        if !config.nosingletons {
+                            counts.count_hit(&map_segments(&record, ref_chr_map, config));
                         }
+                    } else if record.tid() != record.mtid() {
+                        // not same chromosome? then this read pair is ambiguous
+                        counts.ambiguous_pair += 1;
+                    } else if let Some(mate) = delayed.remove(record.qname()) {
+                        let m1 = map_segments(&record, ref_chr_map, config);
+                        let m2 = map_segments(&mate, ref_chr_map, config);
+                        if m1 == m2 {
+                            counts.count_hit(&m1);
+                        } else {
+                            counts.ambiguous_pair += 1;
+                        }
+                    } else {
+                        delayed.insert(record.qname().to_vec(), record);
                     }
                 } else {
                     //Single-end read
-                    counts.count_hit(map_segments(&record, ref_chr_map, config));
+                    counts.count_hit(&map_segments(&record, ref_chr_map, config));
                 }
             } else {
                 // this chr was not in the gtf
@@ -338,7 +328,7 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
     Ok(counts)
 }
 
-fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentHit {
+fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: &Config) -> SegmentHit {
     //Store the first gene hit id
     let mut  target_id = None;
     let cigar = r.cigar();
