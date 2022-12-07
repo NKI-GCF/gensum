@@ -83,18 +83,16 @@ fn parse_seq_types(s: &str) -> Result<HashSet<String>, String> {
                 } else if seq_types.contains("cds") && part == "exon" {
                     return Err("\"cds\" overlaps with exons".to_string());
                 }
-                if !seq_types.insert(part.to_string()) {
-                    eprintln!("duplicate seq-type {part}");
-                }
             }
             _ => {
                 return Err(format!(
                     r#"
-    {part}? supported are --seq-types "exon", "gene", "mRNA", "cds", "intron", "polyA_sequence"
-    "polyA_site", "five_prime_UTR" and "three_prime_UTR".
-"#
+Use one of "exon", "gene", "mRNA", "cds", "intron", "polyA_sequence", "polyA_site", "five_prime_UTR" and "three_prime_UTR"."#
                 ))
             }
+        }
+        if !seq_types.insert(part.to_string()) {
+            eprintln!("duplicate seq-type {part}");
         }
     }
     Ok(seq_types)

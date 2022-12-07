@@ -45,42 +45,58 @@ impl GtfRecord {
     /// Returns None for any other type
     /// Fails when unable to parse or required attributes (gene_id)
     /// are not present
-    pub fn parse_exon(&self, config_seq_types: &HashSet<String>) -> Result<Option<GtfExon>> {
+    pub fn parse_seqtype(&self, config_seq_types: &HashSet<String>) -> Result<Option<GtfExon>> {
         let mut s = self.0.split(|&b| b == b'\t');
-        let seq_name = s.next()
+        let seq_name = s
+            .next()
             .ok_or_else(|| data_error(&self.0))
             .context("No seqname in gtf line")?;
         //skip source
-        let seq_type = s.nth(1)
+        let seq_type = s
+            .nth(1)
             .ok_or_else(|| data_error(&self.0))
             .context("No seqtype in gtf line")?;
-        //eprintln!("type {}", seq_type);
+        //eprintln!("type {}", std::str::from_utf8(seq_type)?);
         if config_seq_types.contains(std::str::from_utf8(seq_type)?) {
             let start = s
                 .next()
                 .and_then(atoi)
                 .ok_or_else(|| data_error(&self.0))
                 .context("Invalid start")?;
-            let end = s.next().and_then(atoi)
+            let end = s
+                .next()
+                .and_then(atoi)
                 .ok_or_else(|| data_error(&self.0))
                 .context("Invalid end")?;
-            let strand = s.nth(1)
+            let strand = s
+                .nth(1)
                 .ok_or("No strand")
                 .and_then(Strand::try_from)
                 .map_err(|_| data_error(&self.0))
                 .context("Invalid strand")?;
 
-            let attrs = s.nth(1).ok_or_else(|| data_error(&self.0)).context("No attributes")?;
+            let attrs = s
+                .nth(1)
+                .ok_or_else(|| data_error(&self.0))
+                .context("No attributes")?;
 
             // split attrs on ';'
             // in the ensembl gtf the gene_id is the first entry so this is not
             // really necessary.
             let mut attr = attrs.split(|&b| b == b';');
-            let id = attr.find(|s| s.starts_with(b"gene_id "))
-                .map(|s| &s[9..s.len()-1])
-                .ok_or_else(|| data_error(&self.0)).context("No gene_id in attributes")?;
+            let id = attr
+                .find(|s| s.starts_with(b"gene_id "))
+                .map(|s| &s[9..s.len() - 1])
+                .ok_or_else(|| data_error(&self.0))
+                .context("No gene_id in attributes")?;
 
-            Ok(Some(GtfExon { seq_name, start, end, strand, id}))
+            Ok(Some(GtfExon {
+                seq_name,
+                start,
+                end,
+                strand,
+                id,
+            }))
         } else {
             Ok(None)
         }
@@ -103,14 +119,14 @@ pub struct GtfExon<'a> {
     pub start: i64,
     pub end: i64,
     pub strand: Strand,
-    pub id: &'a [u8]
+    pub id: &'a [u8],
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Strand {
     Forward,
     Reverse,
-    Unknown
+    Unknown,
 }
 
 impl TryFrom<&[u8]> for Strand {
@@ -120,7 +136,7 @@ impl TryFrom<&[u8]> for Strand {
             b"+" => Ok(Strand::Forward),
             b"-" => Ok(Strand::Reverse),
             b"." => Ok(Strand::Unknown),
-            _ => Err("GTF strand not +/-/.")
+            _ => Err("GTF strand not +/-/."),
         }
     }
 }
@@ -131,7 +147,7 @@ mod test {
 
     use super::*;
 
-    const GTF:&str = r#"#!genome-build GRCh38.p12
+    const GTF: &str = r#"#!genome-build GRCh38.p12
 6	ensembl_havana	gene	170554302	170572870	.	+	.	gene_id "ENSG00000112592"; gene_version "13"; gene_name "TBP"; gene_source "ensembl_havana"; gene_biotype "protein_coding";
 6	havana	transcript	170554302	170566957	.	+	.	gene_id "ENSG00000112592"; gene_version "13"; transcript_id "ENST00000421512"; transcript_version "5"; gene_name "TBP"; gene_source "ensembl_havana"; gene_biotype "protein_coding"; transcript_name "TBP-203"; transcript_source "havana"; transcript_biotype "protein_coding"; tag "cds_end_NF"; tag "mRNA_end_NF"; transcript_support_level "1";
 6	havana	exon	170554302	170554463	.	+	.	gene_id "ENSG00000112592"; gene_version "13"; transcript_id "ENST00000421512"; transcript_version "5"; exon_number "1"; gene_name "TBP"; gene_source "ensembl_havana"; gene_biotype "protein_coding"; transcript_name "TBP-203"; transcript_source "havana"; transcript_biotype "protein_coding"; exon_id "ENSE00001701648"; exon_version "1"; tag "cds_end_NF"; tag "mRNA_end_NF"; transcript_support_level "1";
@@ -139,33 +155,36 @@ mod test {
 6	havana	CDS	170557030	170557083	.	+	0	gene_id "ENSG00000112592"; gene_version "13"; transcript_id "ENST00000421512"; transcript_version "5"; exon_number "2"; gene_name "TBP"; gene_source "ensembl_havana"; gene_biotype "protein_coding"; transcript_name "TBP-203"; transcript_source "havana"; transcript_biotype "protein_coding"; protein_id "ENSP00000400008"; protein_version "1"; tag "cds_end_NF"; tag "mRNA_end_NF"; transcript_support_level "1";
 "#;
 
-
     #[test]
     fn read() {
         let mut reader = GtfReader::new(Cursor::new(GTF));
         let mut record = GtfRecord::new();
+        let seq_types = ["exon".to_string()].iter().collect::<HashSet<String>>();
 
         //gene entry
         assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
-        assert!(matches!(record.parse_exon(), Ok(None)));
+        assert!(matches!(record.parse_seqtype(&seq_types), Ok(None)));
 
         //transcript entry
         assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
-        assert!(matches!(record.parse_exon(), Ok(None)));
+        assert!(matches!(record.parse_seqtype(&seq_types), Ok(None)));
 
         // two exons
         assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
-        assert!(matches!(record.parse_exon(), Ok(Some(r)) if r.id == b"ENSG00000112592"));
+        assert!(
+            matches!(record.parse_seqtype(&seq_types), Ok(Some(r)) if r.id == b"ENSG00000112592")
+        );
 
         assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
-        assert!(matches!(record.parse_exon(), Ok(Some(r)) if r.id == b"ENSG00000112592"));
+        assert!(
+            matches!(record.parse_seqtype(&seq_types), Ok(Some(r)) if r.id == b"ENSG00000112592")
+        );
 
         // and a CDS
         assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
-        assert!(matches!(record.parse_exon(), Ok(None)));
+        assert!(matches!(record.parse_seqtype(&seq_types), Ok(None)));
 
         //EOF
         assert!(matches!(reader.read_record(&mut record), Ok(0)));
     }
 }
-
