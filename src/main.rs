@@ -1,13 +1,14 @@
+use std::collections::HashSet;
 use std::fs::File;
 use std::io;
 
-use clap::Parser;
 use anyhow::Result;
+use clap::Parser;
 
-mod gtf;
 mod app;
+mod gtf;
 
-use app::{GeneMap, quantify_bam, Strandness, QuantMethod};
+use app::{quantify_bam, GeneMap, QuantMethod, Strandness};
 
 #[derive(Debug, Clone, Parser)]
 #[command(author, version, about)]
@@ -38,12 +39,71 @@ pub struct Config {
 
     #[arg(short = 'n', long)]
     nosingletons: bool,
+
+    #[arg(short = 'T', long, default_value = "exon", value_parser = parse_seq_types)]
+    seq_types: HashSet<String>,
+}
+
+fn parse_seq_types(s: &str) -> Result<HashSet<String>, String> {
+    let mut seq_types = HashSet::new();
+    for part in s.split(',') {
+        match part {
+            "gene" => {
+                if !seq_types.is_empty() {
+                    return Err("\"gene\" overlaps other seq_types".to_string());
+                }
+            }
+            "mRNA" => {
+                if !seq_types.is_disjoint(
+                    &["exon", "gene", "cds", "five_prime_UTR", "three_prime_UTR"]
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                ) {
+                    return Err("\"mRNA\" overlaps other requested seq_types".to_string());
+                }
+            }
+            "cds" => {
+                if !seq_types.is_disjoint(
+                    &["exon", "gene", "mRNA"]
+                        .iter()
+                        .map(|s| s.to_string())
+                        .collect(),
+                ) {
+                    return Err("\"mRNA\" overlaps other requested seq_types".to_string());
+                }
+            }
+            "exon" | "intron" | "polyA_sequence" | "polyA_site" | "five_prime_UTR"
+            | "three_prime_UTR" => {
+                if seq_types.contains("gene") {
+                    return Err("\"gene\" overlaps other seq_types".to_string());
+                } else if seq_types.contains("mRNA") && part != "intron" && !part.contains("polyA")
+                {
+                    return Err("\"mRNA\" overlaps other seq_types".to_string());
+                } else if seq_types.contains("cds") && part == "exon" {
+                    return Err("\"cds\" overlaps with exons".to_string());
+                }
+                if !seq_types.insert(part.to_string()) {
+                    eprintln!("duplicate seq-type {part}");
+                }
+            }
+            _ => {
+                return Err(format!(
+                    r#"
+    {part}? supported are --seq-types "exon", "gene", "mRNA", "cds", "intron", "polyA_sequence"
+    "polyA_site", "five_prime_UTR" and "three_prime_UTR".
+"#
+                ))
+            }
+        }
+    }
+    Ok(seq_types)
 }
 
 fn main() -> Result<()> {
     let config = Config::parse();
 
-    let gm = GeneMap::from_gtf(config.gtf.as_str())?;
+    let gm = GeneMap::from_gtf(&config)?;
 
     let res = quantify_bam(&config, &gm)?;
 

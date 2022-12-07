@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::convert::TryFrom;
-use std::io::{self, Read, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use atoi::atoi;
 
 pub struct GtfReader<R> {
@@ -44,7 +45,7 @@ impl GtfRecord {
     /// Returns None for any other type
     /// Fails when unable to parse or required attributes (gene_id)
     /// are not present
-    pub fn parse_exon(&self) -> Result<Option<GtfExon>> {
+    pub fn parse_exon(&self, config_seq_types: &HashSet<String>) -> Result<Option<GtfExon>> {
         let mut s = self.0.split(|&b| b == b'\t');
         let seq_name = s.next()
             .ok_or_else(|| data_error(&self.0))
@@ -54,8 +55,10 @@ impl GtfRecord {
             .ok_or_else(|| data_error(&self.0))
             .context("No seqtype in gtf line")?;
         //eprintln!("type {}", seq_type);
-        if seq_type == b"exon" {
-            let start = s.next().and_then(atoi)
+        if config_seq_types.contains(std::str::from_utf8(seq_type)?) {
+            let start = s
+                .next()
+                .and_then(atoi)
                 .ok_or_else(|| data_error(&self.0))
                 .context("Invalid start")?;
             let end = s.next().and_then(atoi)

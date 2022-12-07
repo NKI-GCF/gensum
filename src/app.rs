@@ -1,8 +1,7 @@
+use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::HashMap;
-use std::io::{Write, BufWriter};
+use std::io::{BufWriter, Write};
 use std::ops::Range;
-use std::path::Path;
-use std::cmp::{Ord, PartialOrd, Ordering};
 use std::str::FromStr;
 use std::time::Instant;
 
@@ -10,10 +9,13 @@ use clap::ValueEnum;
 
 use anyhow::{anyhow, Result};
 use indexmap::IndexSet;
-use nclist::{NClist, Interval};
-use rust_htslib::{bam, bam::Read, bam::record::Cigar};
+use nclist::{Interval, NClist};
+use rust_htslib::{bam, bam::record::Cigar, bam::Read};
 
-use crate::{Config, gtf::{GtfReader, GtfRecord, Strand}};
+use crate::{
+    gtf::{GtfReader, GtfRecord, Strand},
+    Config,
+};
 
 #[derive(ValueEnum, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum QuantMethod {
@@ -128,10 +130,10 @@ pub struct GeneMap {
 }
 
 impl GeneMap {
-    pub fn from_gtf<P: AsRef<Path>>(p: P) -> Result<GeneMap> {
+    pub fn from_gtf(config: &Config) -> Result<GeneMap> {
         //open gtf
         let t0 = Instant::now();
-        let (r, _compression) = niffler::from_path(p)?;
+        let (r, _compression) = niffler::from_path(config.gtf.as_str())?;
         let mut reader = GtfReader::new(r);
         
         let mut genes = IndexSet::new();
@@ -148,7 +150,7 @@ impl GeneMap {
             }
             n += 1;
 
-            if let Some(r) = record.parse_exon()? {
+            if let Some(r) = record.parse_exon(&config.seq_types)? {
                 let gene_idx = get_index_or_insert_owned(&mut genes, r.id);
                 let chr_idx = get_index_or_insert_owned(&mut seq_names, r.seq_name);
 
