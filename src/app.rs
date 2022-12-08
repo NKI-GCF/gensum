@@ -1,34 +1,27 @@
+use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::HashMap;
-use std::io::{Write, BufWriter};
+use std::io::{BufWriter, Write};
 use std::ops::Range;
-use std::path::Path;
-use std::cmp::{Ord, PartialOrd, Ordering};
 use std::str::FromStr;
 use std::time::Instant;
 
+use clap::ValueEnum;
+use itertools::Itertools;
 
 use anyhow::{anyhow, Result};
 use indexmap::IndexSet;
-use nclist::{NClist, Interval};
-use rust_htslib::{bam, bam::Read, bam::record::Cigar};
+use nclist::{Interval, NClist};
+use rust_htslib::{bam, bam::record::Cigar, bam::Read};
 
-use crate::gtf::{GtfReader, GtfRecord, Strand};
+use crate::{
+    gtf::{GtfReader, GtfRecord, Strand},
+    Config,
+};
 
-
-
-#[derive(Debug, Copy, Clone)]
-pub struct Config {
-    pub usedups: bool,
-    pub nosingletons: bool,
-    pub mapq: u8,
-    pub method: QuantMethod,
-    pub strandness: Strandness,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(ValueEnum, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum QuantMethod {
     Union,
-    Strict
+    Strict,
 }
 
 impl FromStr for QuantMethod {
@@ -37,17 +30,16 @@ impl FromStr for QuantMethod {
         match s {
             "strict" => Ok(QuantMethod::Strict),
             "union" => Ok(QuantMethod::Union),
-            _ => Err("Unknown quantification method")
+            _ => Err("Unknown quantification method"),
         }
     }
 }
 
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(ValueEnum, Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Strandness {
     Forward,
     Reverse,
-    Unstranded
+    Unstranded,
 }
 
 impl Strandness {
@@ -56,22 +48,24 @@ impl Strandness {
         if self == Strandness::Unstranded {
             return true;
         }
-        
+
         // Asuming a FR library ( --->____<--- )
         // Determine if fragment is forward
         let fragment_forward = if r.is_paired() {
-            (r.is_first_in_template() && !r.is_reverse()) ||
-                (r.is_last_in_template() && r.is_reverse())
+            (r.is_first_in_template() && !r.is_reverse())
+                || (r.is_last_in_template() && r.is_reverse())
         } else {
             !r.is_reverse()
         };
 
         match (self, target) {
             (_, Strand::Unknown) => true,
-            (Strandness::Forward, Strand::Forward) |
-            (Strandness::Reverse, Strand::Reverse) => fragment_forward,
-            (Strandness::Forward, Strand::Reverse) |
-            (Strandness::Reverse, Strand::Forward) => !fragment_forward,
+            (Strandness::Forward, Strand::Forward) | (Strandness::Reverse, Strand::Reverse) => {
+                fragment_forward
+            }
+            (Strandness::Forward, Strand::Reverse) | (Strandness::Reverse, Strand::Forward) => {
+                !fragment_forward
+            }
             (Strandness::Unstranded, _) => unreachable!(),
         }
     }
@@ -84,36 +78,40 @@ impl FromStr for Strandness {
             "F" => Ok(Strandness::Forward),
             "R" => Ok(Strandness::Reverse),
             "U" => Ok(Strandness::Unstranded),
-            _ => Err("Unknown strandness")
+            _ => Err("Unknown strandness"),
         }
     }
 }
 
-/// Exon is defined by it's coordinates and references a parent Gene
+/// Section is defined by it's coordinates and references a parent Gene
 #[derive(Debug, Eq, PartialEq)]
-struct Exon {
+struct Section {
     id: usize,
     strand: Strand,
     range: Range<i64>,
 }
 
-impl Ord  for Exon {
+impl Ord for Section {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.id.cmp(&other.id)
+        self.id
+            .cmp(&other.id)
             .then(self.range.start.cmp(&other.range.start))
             .then(self.range.end.cmp(&other.range.end))
     }
 }
 
-impl PartialOrd  for Exon {
+impl PartialOrd for Section {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.id.cmp(&other.id)
-            .then(self.range.start.cmp(&other.range.start))
-            .then(self.range.end.cmp(&other.range.end)))
+        Some(
+            self.id
+                .cmp(&other.id)
+                .then(self.range.start.cmp(&other.range.start))
+                .then(self.range.end.cmp(&other.range.end)),
+        )
     }
 }
 
-impl Interval for Exon {
+impl Interval for Section {
     type Coord = i64;
     fn start(&self) -> &Self::Coord {
         &self.range.start
@@ -135,20 +133,19 @@ fn get_index_or_insert_owned(map: &mut IndexSet<Vec<u8>>, v: &[u8]) -> usize {
 pub struct GeneMap {
     genes: IndexSet<Vec<u8>>,
     seq_names: IndexSet<Vec<u8>>,
-    intervals: Vec<NClist<Exon>>,
+    intervals: Vec<NClist<Section>>,
 }
 
 impl GeneMap {
-    pub fn from_gtf<P: AsRef<Path>>(p: P) -> Result<GeneMap> {
+    pub fn from_gtf(config: &Config) -> Result<GeneMap> {
         //open gtf
         let t0 = Instant::now();
-        let (r, _compression) = niffler::from_path(p)?;
+        let (r, _compression) = niffler::from_path(config.gtf.as_path())?;
         let mut reader = GtfReader::new(r);
-        
+
         let mut genes = IndexSet::new();
         let mut seq_names = IndexSet::new();
-        let mut exons = Vec::new();
-
+        let mut sections = Vec::new();
 
         //iterate records
         let mut record = GtfRecord::new();
@@ -159,56 +156,75 @@ impl GeneMap {
             }
             n += 1;
 
-            if let Some(r) = record.parse_exon()? {
+            if let Some(r) = record.parse_seqtype(&config.seq_types)? {
                 let gene_idx = get_index_or_insert_owned(&mut genes, r.id);
                 let chr_idx = get_index_or_insert_owned(&mut seq_names, r.seq_name);
 
-                 if r.end - r.start < 0 {
-                     eprintln!("Skipping zero/negative width exon: {}", record);
-                     continue;
-                 }
-
-                if exons.len() == chr_idx {
-                    exons.push(Vec::new());
+                if r.end - r.start < 0 {
+                    eprintln!("Skipping zero/negative width segment: {}", record);
+                    continue;
                 }
 
-                // gtf exon coordinates are 1 based and closed end
+                if sections.len() == chr_idx {
+                    sections.push(Vec::new());
+                }
+
+                // gtf segment coordinates are 1 based and closed end
                 // bam files are 0 based, and nclist expects half open
-                exons[chr_idx].push(Exon {id: gene_idx, strand: r.strand, range: r.start-1..r.end });
+                sections[chr_idx].push(Section {
+                    id: gene_idx,
+                    strand: r.strand,
+                    range: r.start - 1..r.end,
+                });
             }
         }
         let gtftime = t0.elapsed();
 
         //Create the NClists
-        let mut numexons = 0;
-        let mut numexonsdd = 0;
-        let intervals = exons.into_iter()
+        let mut numsections = 0;
+        let mut numsectionsdd = 0;
+        let intervals = sections
+            .into_iter()
             .map(|mut v| {
-                numexons += v.len();
+                numsections += v.len();
                 v.sort();
                 v.dedup(); //deduplication saves around 50% because of comparable isoforms (and havanna entries)
-            numexonsdd += v.len();
-            NClist::from_vec(v) })
+                numsectionsdd += v.len();
+                NClist::from_vec(v)
+            })
             .collect::<Result<_, _>>()
             .map_err(|_| anyhow!("Cannot create interval search list, all ranges must be > 1"))?;
 
-        eprintln!("{} lines in GTF, parsed {} exons, {} unique geneid-exon ranges ({:?})", n, numexons, numexonsdd, gtftime);
+        let mut seq_types = config.seq_types.iter().cloned().collect::<Vec<_>>();
+        seq_types.sort();
 
-        Ok(GeneMap { genes, seq_names, intervals })
+        let mut target = seq_types.pop().expect("No seq_types?");
+        if !seq_types.is_empty() {
+            target = format!("{} and -{target}", seq_types.drain(..).join(", -"));
+        }
+
+        eprintln!(
+            "{n} lines in GTF, parsed {numsections} sections, {numsectionsdd} unique geneid-{target} ranges ({gtftime:?})"
+        );
+
+        Ok(GeneMap {
+            genes,
+            seq_names,
+            intervals,
+        })
     }
 
     #[inline]
     pub fn hit_name(&self, i: usize) -> Option<&Vec<u8>> {
         self.genes.get_index(i)
     }
-
 }
 
 #[derive(Eq, PartialEq)]
 enum SegmentHit {
     Hit(usize),
     Nohit,
-    Ambiguous
+    Ambiguous,
 }
 
 #[derive(Default)]
@@ -222,24 +238,26 @@ pub struct ReadMappings {
     notingtf: usize,
     mapq: usize,
     nohit: usize,
-    hit: Vec<usize>
+    hit: Vec<usize>,
 }
 
 impl ReadMappings {
     pub fn new(n: usize) -> ReadMappings {
-        ReadMappings { hit: vec![0; n], ..Default::default() }
+        ReadMappings {
+            hit: vec![0; n],
+            ..Default::default()
+        }
     }
 
-    fn count_hit(&mut self, h: SegmentHit) {
+    fn count_hit(&mut self, h: &SegmentHit) {
         match h {
             SegmentHit::Nohit => self.nohit += 1,
             SegmentHit::Ambiguous => self.ambiguous += 1,
-            SegmentHit::Hit(id) => self.hit[id] += 1,
+            SegmentHit::Hit(id) => self.hit[*id] += 1,
         }
     }
 
     pub fn write<W: Write>(&self, o: W, genes: &GeneMap) -> Result<()> {
-
         let mut w = BufWriter::new(o);
         for (geneidx, &count) in self.hit.iter().enumerate() {
             w.write_all(genes.hit_name(geneidx).unwrap())?;
@@ -262,16 +280,22 @@ impl ReadMappings {
     }
 }
 
-pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneMap) -> Result<ReadMappings> {
+pub fn quantify_bam(config: &Config, genemap: &GeneMap) -> Result<ReadMappings> {
     //open bam
-    let mut bam = bam::Reader::from_path(bam_file)?;
+    let mut bam = match config.bam.as_str() {
+        "/dev/stdin" | "-" => bam::Reader::from_stdin()?,
+        b => bam::Reader::from_path(b)?,
+    };
     // test from command line show improve until 4 cpu's
     bam.set_threads(4)?;
 
     //intersect header chr list with rr
     let header = bam.header();
-    let tid_map: Vec<_> = header.target_names().iter()
-        .map(|name| genemap.seq_names.iter().position(|n| name == &n.as_slice())).collect();
+    let tid_map: Vec<_> = header
+        .target_names()
+        .iter()
+        .map(|name| genemap.seq_names.iter().position(|n| name == &n.as_slice()))
+        .collect();
 
     //quantify
     let mut delayed = HashMap::new();
@@ -279,110 +303,111 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
 
     for record in bam.records() {
         let record = record?;
-            if record.is_unmapped() {
-                counts.unmapped += 1;
-                continue;
-            }
+        if record.is_unmapped() {
+            counts.unmapped += 1;
+            continue;
+        }
 
-            if record.is_quality_check_failed() {
-                counts.qc_failed += 1;
-            }
-            if record.is_secondary() || record.is_supplementary() {
-                counts.secondary += 1;
-                continue;
-            }
+        if record.is_quality_check_failed() {
+            counts.qc_failed += 1;
+            continue;
+        }
+        if record.is_secondary() || (record.is_supplementary() && !config.use_supplementary) {
+            counts.secondary += 1;
+            continue;
+        }
 
-            if !config.usedups && record.is_duplicate() {
-                counts.duplicated += 1;
-                continue;
-            }
+        if !config.usedups && record.is_duplicate() {
+            counts.duplicated += 1;
+            continue;
+        }
 
-            if record.mapq() < config.mapq {
-                counts.mapq += 1;
-                continue;
-            }
+        if record.mapq() < config.mapq {
+            counts.mapq += 1;
+            continue;
+        }
 
-            if let Some(ref_chr_id) = tid_map[record.tid() as usize] {
-                let ref_chr_map = &genemap.intervals[ref_chr_id];
-                if record.is_paired() {
-                    if record.is_mate_unmapped() && !config.nosingletons {
-                        counts.count_hit(map_segments(&record, ref_chr_map, config));
+        if let Some(ref_chr_id) = tid_map[record.tid() as usize] {
+            let ref_chr_map = &genemap.intervals[ref_chr_id];
+            if record.is_paired() {
+                if record.is_mate_unmapped() {
+                    if !config.nosingletons {
+                        counts.count_hit(&map_segments(&record, ref_chr_map, config));
+                    }
+                } else if record.tid() != record.mtid() {
+                    // not same chromosome? then this read pair is ambiguous
+                    counts.ambiguous_pair += 1;
+                } else if let Some(mate) = delayed.remove(record.qname()) {
+                    let m1 = map_segments(&record, ref_chr_map, config);
+                    let m2 = map_segments(&mate, ref_chr_map, config);
+                    if m1 == m2 {
+                        counts.count_hit(&m1);
                     } else {
-                        //is the mate on the same chromosome? if not than this read pair is ambiguous
-                        if record.tid() != record.mtid() {
-                            counts.ambiguous_pair += 1;
-                        } else if let Some(mate) = delayed.remove(record.qname()) {
-                            let m1 = map_segments(&record, ref_chr_map, config);
-                            let m2 = map_segments(&mate, ref_chr_map, config);
-                            if m1 == m2 {
-                                counts.count_hit(m1);
-                            } else {
-                                counts.ambiguous_pair += 1;
-                            }
-                        } else {
-                            delayed.insert(record.qname().to_vec(), record);
-                        }
+                        counts.ambiguous_pair += 1;
                     }
                 } else {
-                    //Single-end read
-                    counts.count_hit(map_segments(&record, ref_chr_map, config));
+                    delayed.insert(record.qname().to_vec(), record);
                 }
             } else {
-                // this chr was not in the gtf
-                counts.notingtf += 1;
+                //Single-end read
+                counts.count_hit(&map_segments(&record, ref_chr_map, config));
             }
+        } else {
+            // this chr was not in the gtf
+            counts.notingtf += 1;
+        }
     }
     Ok(counts)
 }
 
-fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentHit {
+fn map_segments(r: &bam::Record, map: &NClist<Section>, config: &Config) -> SegmentHit {
     //Store the first gene hit id
-    let mut  target_id = None;
+    let mut target_id = None;
     let cigar = r.cigar();
 
     let strict = config.method == QuantMethod::Strict;
     let strandness = config.strandness;
 
     // use cigar line to filter the cigar to ranges (o) that lie on the genome
-    for o in cigar.into_iter().scan(r.pos(), |pos, c| {
-        match c {
+    for o in cigar
+        .into_iter()
+        .scan(r.pos(), |pos, c| match c {
             Cigar::Del(n) | Cigar::RefSkip(n) => {
                 *pos += *n as i64;
                 Some(None)
-            },
-            Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => {
-                Some(None)
-            },
+            }
+            Cigar::Ins(_) | Cigar::SoftClip(_) | Cigar::HardClip(_) | Cigar::Pad(_) => Some(None),
             Cigar::Match(n) | Cigar::Equal(n) | Cigar::Diff(n) => {
                 let r = *pos..*pos + *n as i64;
                 *pos += *n as i64;
                 Some(Some(r))
             }
-        }
-    }).flatten()
+        })
+        .flatten()
     {
-        //match this segment's genomic region to exons and filter based on program configuration
-        let exons =  map.overlaps(&o)
+        //match this segment's genomic region to sections and filter based on program configuration
+        let sections = map
+            .overlaps(&o)
             .filter(|e| !strict || (o.start >= *e.start() && o.end <= *e.end()))
             .filter(|e| strandness.matches_bam_record(r, e.strand));
 
-        // check that all overlapping exons map to the same gene
+        // check that all overlapping sections map to the same gene
         let mut segment_ambiguous = false;
         let mut segment_id = None;
 
-        for exon in exons {
+        for section in sections {
             if let Some(id) = segment_id {
-                if !strict && (id != exon.id) {
+                if !strict && (id != section.id) {
                     // in  union mode any part linking to a different gene makes it ambiguous
                     return SegmentHit::Ambiguous;
-                } else if strict && id != exon.id {
-                    // in strict mode ambigous segments can be recued if a unique mapping is 
+                } else if strict && id != section.id {
+                    // in strict mode ambigous segments can be recued if a unique mapping is
                     // available from other segments
                     segment_ambiguous = true;
                     break;
-                } 
+                }
             } else {
-                segment_id = Some(exon.id)
+                segment_id = Some(section.id)
             }
         }
 
@@ -393,12 +418,12 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
 
         if !segment_ambiguous {
             if target_id.is_some() && segment_id.is_some() && target_id != segment_id {
-                return SegmentHit::Ambiguous
+                return SegmentHit::Ambiguous;
             }
             if target_id.is_none() && segment_id.is_some() {
                 target_id = segment_id;
             }
-        } 
+        }
     }
 
     if let Some(id) = target_id {
@@ -407,4 +432,3 @@ fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentH
         SegmentHit::Nohit
     }
 }
-
