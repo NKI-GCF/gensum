@@ -159,7 +159,8 @@ mod test {
     fn read() {
         let mut reader = GtfReader::new(Cursor::new(GTF));
         let mut record = GtfRecord::new();
-        let seq_types = ["exon".to_string()].iter().collect::<HashSet<String>>();
+        let mut seq_types = HashSet::new();
+        seq_types.insert("exon".to_string());
 
         //gene entry
         assert!(matches!(reader.read_record(&mut record), Ok(n) if n > 0));
