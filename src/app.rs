@@ -140,7 +140,7 @@ impl GeneMap {
     pub fn from_gtf(config: &Config) -> Result<GeneMap> {
         //open gtf
         let t0 = Instant::now();
-        let (r, _compression) = niffler::from_path(config.gtf.as_str())?;
+        let (r, _compression) = niffler::from_path(config.gtf.as_path())?;
         let mut reader = GtfReader::new(r);
 
         let mut genes = IndexSet::new();
