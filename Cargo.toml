@@ -15,3 +15,4 @@ clap = { version = "4.0.29", features = ["derive"] }
 itoa = "0.4.5"
 atoi = "0.4.0"
 niffler = "2.2.0"
+itertools = "0.10.5"
