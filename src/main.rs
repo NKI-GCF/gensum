@@ -48,7 +48,7 @@ fn main() -> Result<()> {
                  .short('s')
                  .required(false)
                  .takes_value(true)
-                 .possible_values(&["F", "R", "U"])
+                 .possible_values(["F", "R", "U"])
                  .default_value("U"))
         .arg(Arg::with_name("qmethod")
                  .help("The quantification method, 'strict' or 'union'. 'union' counts all \
@@ -58,7 +58,7 @@ fn main() -> Result<()> {
                  .short('m')
                  .required(false)
                  .takes_value(true)
-                 .possible_values(&["union", "strict"])
+                 .possible_values(["union", "strict"])
                  .default_value("union"))
         .arg(Arg::with_name("usedups")
                  .help("Also count read (pairs) marked as (optical) duplicate, default \
