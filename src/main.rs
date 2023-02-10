@@ -72,40 +72,28 @@ fn parse_seq_types(s: &str) -> Result<HashSet<String>, String> {
                     return Err("\"gene\" overlaps other seq_types".to_string());
                 }
             }
-            "mRNA" => {
-                if !seq_types.is_disjoint(
-                    &["exon", "gene", "cds", "five_prime_UTR", "three_prime_UTR"]
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                ) {
+            "CDS" => {
+                if ["exon", "gene", "transcript"].iter().any(|&x| seq_types.contains(x)) {
                     return Err("\"mRNA\" overlaps other requested seq_types".to_string());
                 }
             }
-            "cds" => {
-                if !seq_types.is_disjoint(
-                    &["exon", "gene", "mRNA"]
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                ) {
+            "transcript" => {
+                if ["exon", "gene", "CDS"].iter().any(|&x| seq_types.contains(x)) {
                     return Err("\"mRNA\" overlaps other requested seq_types".to_string());
                 }
             }
-            "exon" | "intron" | "polyA_sequence" | "polyA_site" | "five_prime_UTR"
-            | "three_prime_UTR" => {
+            "exon" | "stop_codon" | "start_codon" | "five_prime_UTR" | "three_prime_UTR" | "Selenocysteine" => {
                 if seq_types.contains("gene") {
-                    return Err("\"gene\" overlaps other seq_types".to_string());
-                } else if seq_types.contains("mRNA") && part != "intron" && !part.contains("polyA")
-                {
-                    return Err("\"mRNA\" overlaps other seq_types".to_string());
-                } else if seq_types.contains("cds") && part == "exon" {
-                    return Err("\"cds\" overlaps with exons".to_string());
+                    return Err(format!("\"gene\" overlaps with {part}"));
+                } else if seq_types.contains("transcript") && !part.contains("UTR") {
+                    return Err(format!("\"transcript\" overlaps with {part}"));
+                } else if seq_types.contains("CDS") && part == "exon" {
+                    return Err("\"CDS\" overlaps with exon".to_string());
                 }
             }
             _ => {
                 return Err(r#"
-Use one of "exon", "gene", "mRNA", "cds", "intron", "polyA_sequence", "polyA_site", "five_prime_UTR" and "three_prime_UTR"."#.to_string())
+Use one of "exon", "transcript", "CDS", "gene", "stop_codon", "start_codon", "five_prime_UTR", "three_prime_UTR", "transcript" and "Selenocysteine"."#.to_string())
             }
         }
         if !seq_types.insert(part.to_string()) {
