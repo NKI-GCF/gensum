@@ -241,10 +241,11 @@ impl ReadMappings {
     pub fn write<W: Write>(&self, o: W, genes: &GeneMap) -> Result<()> {
 
         let mut w = BufWriter::new(o);
+        let mut ibuf = itoa::Buffer::new();
         for (geneidx, &count) in self.hit.iter().enumerate() {
             w.write_all(genes.hit_name(geneidx).unwrap())?;
             w.write_all(&[b'\t'])?;
-            itoa::write(&mut w, count)?;
+            w.write_all(ibuf.format(count).as_bytes())?;
             w.write_all(&[b'\n'])?;
         }
 
