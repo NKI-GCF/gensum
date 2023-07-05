@@ -3,7 +3,7 @@ use std::io;
 use std::path::PathBuf;
 
 use clap::Parser;
-use anyhow::{Result, Context};
+use anyhow::Result;
 
 mod gtf;
 mod app;
