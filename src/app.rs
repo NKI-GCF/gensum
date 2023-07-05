@@ -25,7 +25,7 @@ pub enum QuantMethod {
 #[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]
 pub enum Strandness {
     #[clap(name = "F")]
-    Forward
+    Forward,
     #[clap(name = "R")]
     Reverse,
     #[clap(name = "U")]
