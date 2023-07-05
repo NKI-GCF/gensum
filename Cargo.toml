@@ -1,6 +1,6 @@
 [package]
 name = "gensum"
-version = "0.1.4"
+version = "0.2.0"
 authors = ["Arno Velds <a.velds@nki.nl>"]
 edition = "2018"
 
@@ -9,7 +9,7 @@ rust-htslib = "0.44"
 nclist = "0.1.1"
 anyhow = "1.0.27"
 indexmap = "2.0.0"
-clap = { version = "3.2", features = ["cargo"] }
+clap = { version = "4.3", features = ["cargo", "derive", "wrap_help"] }
 itoa = "1.0"
 atoi = "2.0"
 niffler = "2.2.0"

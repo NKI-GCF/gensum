@@ -3,50 +3,32 @@ use std::io::{Write, BufWriter};
 use std::ops::Range;
 use std::path::Path;
 use std::cmp::{Ord, PartialOrd, Ordering};
-use std::str::FromStr;
 use std::time::Instant;
 
 
 use anyhow::{anyhow, Result};
+use clap::ValueEnum;
 use indexmap::IndexSet;
 use nclist::{NClist, Interval};
 use rust_htslib::{bam, bam::Read, bam::record::Cigar};
 
+use crate::Args;
 use crate::gtf::{GtfReader, GtfRecord, Strand};
 
 
-
-#[derive(Debug, Copy, Clone)]
-pub struct Config {
-    pub usedups: bool,
-    pub nosingletons: bool,
-    pub mapq: u8,
-    pub method: QuantMethod,
-    pub strandness: Strandness,
-}
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]
 pub enum QuantMethod {
     Union,
     Strict
 }
 
-impl FromStr for QuantMethod {
-    type Err = &'static str;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "strict" => Ok(QuantMethod::Strict),
-            "union" => Ok(QuantMethod::Union),
-            _ => Err("Unknown quantification method")
-        }
-    }
-}
-
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]
 pub enum Strandness {
-    Forward,
+    #[clap(name = "F")]
+    Forward
+    #[clap(name = "R")]
     Reverse,
+    #[clap(name = "U")]
     Unstranded
 }
 
@@ -77,19 +59,7 @@ impl Strandness {
     }
 }
 
-impl FromStr for Strandness {
-    type Err = &'static str;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "F" => Ok(Strandness::Forward),
-            "R" => Ok(Strandness::Reverse),
-            "U" => Ok(Strandness::Unstranded),
-            _ => Err("Unknown strandness")
-        }
-    }
-}
-
-/// Exon is defined by it's coordinates and references a parent Gene
+/// Exon is defined by its coordinates and references a parent Gene
 #[derive(Debug, Eq, PartialEq)]
 struct Exon {
     id: usize,
@@ -263,7 +233,7 @@ impl ReadMappings {
     }
 }
 
-pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneMap) -> Result<ReadMappings> {
+pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: &Args, genemap: &GeneMap) -> Result<ReadMappings> {
     //open bam
     let mut bam = bam::Reader::from_path(bam_file)?;
     // test from command line show improve until 4 cpu's
@@ -336,7 +306,7 @@ pub fn quantify_bam<P: AsRef<Path>>(bam_file: P, config: Config, genemap: &GeneM
     Ok(counts)
 }
 
-fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: Config) -> SegmentHit {
+fn map_segments(r: &bam::Record, map: &NClist<Exon>, config: &Args) -> SegmentHit {
     //Store the first gene hit id
     let mut  target_id = None;
     let cigar = r.cigar();
