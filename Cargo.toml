@@ -1,6 +1,6 @@
 [package]
 name = "gensum"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Arno Velds <a.velds@nki.nl>"]
 edition = "2018"
 
